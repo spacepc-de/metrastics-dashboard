@@ -1,0 +1,83 @@
+{% extends "mqtt_listener/base.html" %}
+{% load static %}
+
+{% block title %}Documentation - Connecting Meshtastic Node{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Connecting Your Meshtastic Node to Metrastics</h1>
+    <hr>
+
+    <p class="lead">This guide will walk you through configuring your Meshtastic node to send data to the Metrastics dashboard via MQTT.</p>
+
+    <h2>Prerequisites</h2>
+    <ul>
+        <li>A configured Meshtastic device.</li>
+        <li>Access to your Meshtastic node's configuration (e.g., via the Meshtastic Web UI, Python API, or mobile app).</li>
+        <li>Your Metrastics project is set up to receive data from MQTT.</li>
+    </ul>
+
+    <h2>Configuration Steps</h2>
+    <p>You need to configure the MQTT module on your Meshtastic node. The key parameters are the MQTT server address, port, and optionally, credentials if your server requires them.</p>
+
+    <ol>
+        <li>
+            <strong>Access MQTT Settings:</strong>
+            <p>Navigate to the MQTT configuration section in your Meshtastic device settings. This is typically found under "Modules" or "Network Settings."</p>
+        </li>
+        <li>
+            <strong>Enable MQTT:</strong>
+            <p>Ensure the MQTT module is enabled.</p>
+        </li>
+        <li>
+            <strong>Set MQTT Server Address:</strong>
+            <p>Configure the MQTT server (broker) address to point to Metrastics:</p>
+            <p><code>metrastics.com</code></p>
+        </li>
+        <li>
+            <strong>Set MQTT Port:</strong>
+            <p>The standard unencrypted MQTT port is <code>1883</code>. If Metrastics uses encrypted MQTT (MQTTS), the port is typically <code>8883</code>. Please verify the correct port for <code>metrastics.com</code>.</p>
+            <ul>
+                <li>For unencrypted MQTT: <code>1883</code></li>
+                <li>For encrypted MQTT (MQTTS/TLS): <code>8883</code> (Recommended for security)</li>
+            </ul>
+            <p><em>For this example, we'll assume port <code>1883</code> unless specified otherwise by Metrastics.</em></p>
+        </li>
+        <li>
+            <strong>(Optional) Username and Password:</strong>
+            <p>If your Metrastics MQTT setup requires authentication, enter the provided username and password in the respective fields. If no authentication is needed, these can usually be left blank.</p>
+        </li>
+        <li>
+            <strong>(Optional) Encrypted Connection (TLS/SSL):</strong>
+            <p>If <code>metrastics.com</code> uses port <code>8883</code> or requires an encrypted connection, ensure that the "Enable SSL/TLS" or "Encrypted" option is checked in your Meshtastic MQTT settings.</p>
+        </li>
+        <li>
+            <strong>(Optional) Root Topic:</strong>
+            <p>Meshtastic devices publish data under a root topic, typically <code>msh</code>. You can often customize this. The default is usually fine: <code>msh/REGION/NODE_ID/</code>. For example: <code>msh/US/!yournodeid/</code>. Metrastics will be configured to listen on the appropriate topics.</p>
+        </li>
+        <li>
+            <strong>Save and Reboot:</strong>
+            <p>After configuring these settings, save them to your Meshtastic node. It's often a good idea to reboot the node to ensure the new settings take effect.</p>
+        </li>
+    </ol>
+
+    <h2>Verifying Connection</h2>
+    <p>Once configured, your Meshtastic node should start sending data (like position updates, sensor metrics, and messages) to <code>metrastics.com</code>. You should then see this data appearing in your Metrastics dashboard.</p>
+    <ul>
+        <li>Check the logs or status page on your Meshtastic device for any MQTT connection errors.</li>
+        <li>Monitor your Metrastics dashboard for incoming data from your node.</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+        <li><strong>No Data:</strong> Double-check the server address, port, and credentials (if any). Ensure your Meshtastic node has an internet connection if it's using WiFi, or that its gateway (if applicable) is correctly configured and online.</li>
+        <li><strong>Connection Errors:</strong> Verify firewall settings if you are on a restricted network. Ensure <code>metrastics.com</code> is reachable from your node's network.</li>
+        <li><strong>Topic Mismatch:</strong> Confirm that the topics your node is publishing to are the ones Metrastics is subscribed to.</li>
+    </ul>
+
+    <p>If you encounter further issues, please consult the official Meshtastic documentation or the support channels for your Metrastics project.</p>
+
+    <hr>
+    <a href="{% url 'mqtt_listener:dashboard_overview' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

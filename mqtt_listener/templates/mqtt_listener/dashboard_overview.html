@@ -1,0 +1,279 @@
+{% extends 'mqtt_listener/base.html' %}
+{% load static %}
+
+{% block title %}Meshtastic MQTT Dashboard - Overview{% endblock %}
+
+{% block extra_head %}
+    <style>
+        .card-deck-custom {
+            display: flex;
+            flex-wrap: wrap;
+            margin-right: -15px;
+            margin-left: -15px;
+        }
+        .card-deck-custom .card {
+            flex: 1 0 0%;
+            margin-right: 15px;
+            margin-left: 15px;
+            margin-bottom: 1rem;
+        }
+        @media (min-width: 576px) {
+            .card-deck-custom .card {
+                min-width: calc(50% - 30px); /* For 2 cards per row on small screens */
+            }
+        }
+        @media (min-width: 992px) {
+            .card-deck-custom .card {
+                min-width: calc(33.333% - 30px); /* For 3 cards per row on larger screens */
+            }
+        }
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            background-color: #bbb;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-online {
+            background-color: #28a745; /* Green */
+        }
+        .node-link {
+            font-weight: bold;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="container-fluid mt-4">
+        <div class="row mb-4">
+            <div class="col-md-6 col-lg-3 mb-3">
+                <div class="card text-white bg-primary shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-network-wired me-2"></i>Nodes</h5>
+                        <p class="card-text fs-4">{{ node_count }}</p>
+                    </div>
+                    <div class="card-footer text-center">
+                        <a href="{% url 'mqtt_listener:node_list' %}" class="text-white">Show Details <i class="fas fa-arrow-circle-right"></i></a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3 mb-3">
+                <div class="card text-white bg-success shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-envelope-open-text me-2"></i>Messages</h5>
+                        <p class="card-text fs-4">{{ message_count }}</p>
+                    </div>
+                     <div class="card-footer text-center">
+                        <a href="{% url 'mqtt_listener:message_list' %}" class="text-white">Show Details <i class="fas fa-arrow-circle-right"></i></a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3 mb-3">
+                <div class="card text-white bg-info shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-map-marked-alt me-2"></i>Nodes with Position</h5>
+                        <p class="card-text fs-4">{{ nodes_with_last_pos|length }}</p>
+                    </div>
+                    <div class="card-footer text-center">
+                        <a href="{% url 'mqtt_listener:map_view' %}" class="text-white">Show Map <i class="fas fa-arrow-circle-right"></i></a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3 mb-3">
+                <div class="card text-dark bg-light shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-clock me-2"></i>Last Update</h5>
+                        <p class="card-text fs-5">{% now "Y-m-d H:i:s" %}</p> {# Changed date format #}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-6 mb-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-secondary text-white">
+                        <h4 class="mb-0"><i class="fas fa-map-pin me-2"></i>Nodes with Last Known Position</h4>
+                    </div>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                        {% if nodes_with_last_pos %}
+                            <ul class="list-group list-group-flush">
+                                {% for pos_data in nodes_with_last_pos %}
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="status-dot status-online" title="Online"></span>
+                                        {# Ensure get_identifier exists or has a fallback #}
+                                        <a href="{% url 'mqtt_listener:node_detail' pos_data.packet.from_node.get_identifier|default:pos_data.packet.from_node.pk %}" class="node-link">
+                                            {{ pos_data.packet.from_node|default_if_none:"Unknown Node" }}
+                                        </a>
+                                        <br>
+                                        <small class="text-muted">
+                                            Lat: {{ pos_data.latitude|floatformat:5 }}, Lon: {{ pos_data.longitude|floatformat:5 }}
+                                            {% if pos_data.altitude %} (Alt: {{ pos_data.altitude }}m){% endif %}
+                                        </small>
+                                    </div>
+                                    <span class="badge bg-light text-dark rounded-pill">{{ pos_data.timestamp_device|date:"m-d H:i" }}</span> {# Changed date format #}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-info mb-0" role="alert">
+                                <i class="fas fa-info-circle me-2"></i>No nodes with current position data found.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 mb-4">
+                <div class="card shadow-sm h-100">
+                     <div class="card-header bg-secondary text-white">
+                        <h4 class="mb-0"><i class="fas fa-history me-2"></i>Latest Messages (Top {{ recent_messages|length }})</h4>
+                    </div>
+                    <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
+                        {% if recent_messages %}
+                        <div class="table-responsive">
+                            <table class="table table-hover table-sm mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Time (MQTT)</th>
+                                        <th>Type</th>
+                                        <th>From</th>
+                                        <th>Info</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for msg in recent_messages %}
+                                    <tr>
+                                        <td><small>{{ msg.timestamp_mqtt|date:"H:i:s" }}</small></td>
+                                        <td>
+                                            <span class="badge
+                                                {% if msg.message_type == 'text' %}bg-primary
+                                                {% elif msg.message_type == 'position' %}bg-success
+                                                {% elif msg.message_type == 'telemetry' %}bg-info
+                                                {% elif msg.message_type == 'nodeinfo' %}bg-warning text-dark
+                                                {% else %}bg-secondary
+                                                {% endif %}">
+                                                {{ msg.message_type|default:"N/A"|capfirst }}
+                                            </span>
+                                        </td>
+                                        <td><small><a href="{% url 'mqtt_listener:node_detail' msg.from_node.get_identifier|default:msg.from_node.pk %}" class="node-link">{{ msg.from_node|default:"N/A"|truncatechars:15 }}</a></small></td>
+                                        <td>
+                                            <small>
+                                            {% if msg.message_type == "text" and msg.text_message_data %}
+                                                {{ msg.text_message_data.text|truncatechars:30 }}
+                                            {% elif msg.message_type == "position" and msg.position_data %}
+                                                <i class="fas fa-location-arrow text-success me-1"></i> Lat: {{ msg.position_data.latitude|floatformat:2 }}, Lon: {{ msg.position_data.longitude|floatformat:2 }}
+                                            {% elif msg.message_type == "telemetry" and msg.telemetry_data %}
+                                                <i class="fas fa-battery-half text-info me-1"></i>
+                                                {% if msg.telemetry_data.battery_level is not None %}{{ msg.telemetry_data.battery_level }}%{% endif %}
+                                                {% if msg.telemetry_data.voltage is not None %} ({{ msg.telemetry_data.voltage|floatformat:2 }}V){% endif %}
+                                            {% elif msg.rssi_mqtt is not None or msg.snr_mqtt is not None %}
+                                                 <i class="fas fa-signal text-muted me-1"></i>
+                                                 {% if msg.rssi_mqtt %}RSSI: {{ msg.rssi_mqtt }}{% endif %}
+                                                 {% if msg.snr_mqtt %} SNR: {{ msg.snr_mqtt|floatformat:1 }}{% endif %}
+                                            {% else %}
+                                                <em class="text-muted">(No details)</em>
+                                            {% endif %}
+                                            </small>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                            <div class="alert alert-info m-3" role="alert">
+                                <i class="fas fa-info-circle me-2"></i>No recent messages available.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white"> {# Dark header for distinction #}
+                        <h4 class="mb-0"><i class="fas fa-stopwatch me-2"></i>Activities of the Last 24 Hours</h4>
+                    </div>
+                    <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+                        {% if recent_activities %}
+                        <div class="table-responsive">
+                            <table class="table table-hover table-sm mb-0">
+                                <thead class="table-light sticky-top"> {# sticky-top for the table header #}
+                                    <tr>
+                                        <th>Time (MQTT)</th>
+                                        <th>Type</th>
+                                        <th>From</th>
+                                        <th>To</th>
+                                        <th>Info</th>
+                                        <th>Via</th>
+                                        <th>RSSI/SNR</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for activity in recent_activities %}
+                                    <tr>
+                                        <td><small>{{ activity.timestamp_mqtt|date:"H:i:s" }}</small></td>
+                                        <td>
+                                            <span class="badge
+                                                {% if activity.message_type == 'text' %}bg-primary
+                                                {% elif activity.message_type == 'position' %}bg-success
+                                                {% elif activity.message_type == 'telemetry' %}bg-info
+                                                {% elif activity.message_type == 'nodeinfo' %}bg-warning text-dark
+                                                {% else %}bg-secondary
+                                                {% endif %}">
+                                                {{ activity.message_type|default:"N/A"|capfirst }}
+                                            </span>
+                                        </td>
+                                        <td><small><a href="{% url 'mqtt_listener:node_detail' activity.from_node.get_identifier|default:activity.from_node.pk %}" class="node-link">{{ activity.from_node|default:"N/A"|truncatechars:15 }}</a></small></td>
+                                        <td><small>
+                                            {# *** THIS IS WHERE THE CHANGE IS *** #}
+                                            {{ activity.get_recipient_display|truncatechars:15 }}
+                                        </small></td>
+                                        <td>
+                                            <small>
+                                            {% if activity.message_type == "text" and activity.text_message_data %}
+                                                {{ activity.text_message_data.text|truncatechars:30 }}
+                                            {% elif activity.message_type == "position" and activity.position_data %}
+                                                <i class="fas fa-location-arrow text-success me-1"></i> Lat: {{ activity.position_data.latitude|floatformat:2 }}, Lon: {{ activity.position_data.longitude|floatformat:2 }}
+                                            {% elif activity.message_type == "telemetry" and activity.telemetry_data %}
+                                                <i class="fas fa-battery-half text-info me-1"></i>
+                                                {% if activity.telemetry_data.battery_level is not None %}{{ activity.telemetry_data.battery_level }}%{% endif %}
+                                                {% if activity.telemetry_data.voltage is not None %} ({{ activity.telemetry_data.voltage|floatformat:2 }}V){% endif %}
+                                            {% else %}
+                                                <em class="text-muted">(Specific data not available)</em>
+                                            {% endif %}
+                                            </small>
+                                        </td>
+                                         <td><small>{{ activity.sender_node|default_if_none:activity.gateway_id_hex|default:"N/A"|truncatechars:10 }}</small></td>
+                                        <td><small>{% if activity.rssi_mqtt %}{{ activity.rssi_mqtt }}{% endif %}{% if activity.snr_mqtt %} / {{ activity.snr_mqtt|floatformat:1 }}{% endif %}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                            <div class="alert alert-light m-3" role="alert">
+                                <i class="fas fa-info-circle me-2"></i>No activities recorded in the last 24 hours.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/js/all.min.js"></script>
+    <script>
+        // Optional: Auto-Reload, if desired
+        // setInterval(function(){
+        //    window.location.reload();
+        // }, 60000); // Every 60 seconds
+    </script>
+{% endblock %}

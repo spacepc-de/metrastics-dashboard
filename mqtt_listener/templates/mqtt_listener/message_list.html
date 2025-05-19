@@ -1,0 +1,110 @@
+{% extends "mqtt_listener/base.html" %}
+{% load tz %} {# Für die Zeitzonenlokalisierung, falls settings.TIME_ZONE gesetzt ist #}
+
+{% block title %}Nachrichtenübersicht{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Nachrichtenübersicht</h2>
+
+    {# Such- und Filterformular basierend auf message_list_view #}
+    <form method="get" class="mb-3">
+        <div class="row g-3 align-items-center">
+            <div class="col-sm-6">
+                <label for="queryInput" class="visually-hidden">Suche</label>
+                <input type="text" name="q" id="queryInput" class="form-control" placeholder="Suche (Absender, Inhalt, Topic...)" value="{{ current_query|default:'' }}">
+            </div>
+            <div class="col-sm-4">
+                <label for="typeSelect" class="visually-hidden">Nachrichtentyp</label>
+                <select name="message_type" id="typeSelect" class="form-select">
+                    <option value="">Alle Nachrichtentypen</option>
+                    {% for type_name in message_types %}
+                        <option value="{{ type_name }}" {% if type_name == message_type_filter %}selected{% endif %}>
+                            {{ type_name|capfirst|default:"Unbekannt" }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-2">
+                <button type="submit" class="btn btn-primary w-100">Filtern</button>
+            </div>
+        </div>
+    </form>
+
+    {% if page_obj %}
+        <div class="list-group">
+            {% for message in page_obj %}
+                <div class="list-group-item list-group-item-action flex-column align-items-start mb-2 shadow-sm">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1 text-primary">
+                            Topic: {{ message.topic }}
+                        </h5>
+                        <small class="text-muted">
+                            {# Zeitzone berücksichtigen, falls TIME_ZONE in settings.py konfiguriert ist #}
+                            {% if settings.TIME_ZONE %}
+                                {{ message.timestamp_mqtt|timezone:settings.TIME_ZONE|date:"d.m.Y H:i:s" }}
+                            {% else %}
+                                {{ message.timestamp_mqtt|date:"d.m.Y H:i:s" }} UTC
+                            {% endif %}
+                        </small>
+                    </div>
+                    <p class="mb-1">
+                        <strong>Von Node:</strong>
+                        {% if message.from_node %}
+                            <a href="{% url 'mqtt_listener:node_detail' node_identifier=message.from_node.node_id_hex|default:message.from_node.pk %}">
+                                {{ message.from_node }}
+                            </a>
+                        {% else %}
+                            <span class="text-muted">Unbekannt</span>
+                        {% endif %}
+                        {% if message.sender_node and message.sender_node != message.from_node %}
+                            (via <a href="{% url 'mqtt_listener:node_detail' node_identifier=message.sender_node.node_id_hex|default:message.sender_node.pk %}">{{ message.sender_node }}</a>)
+                        {% endif %}
+                    </p>
+                    <p class="mb-1">
+                        <strong>Typ:</strong> {{ message.message_type|capfirst|default:"N/A" }}
+                    </p>
+
+                    {% if message.text_message_data and message.text_message_data.text %}
+                        <p class="mb-1"><strong>Text:</strong> <span class="text-body">{{ message.text_message_data.text }}</span></p>
+                    {% elif message.message_type == "position" and message.position_data %}
+                        <p class="mb-1">
+                            <strong>Position:</strong>
+                            Lat: <span class="text-success">{{ message.position_data.latitude|floatformat:5 }}</span>,
+                            Lon: <span class="text-success">{{ message.position_data.longitude|floatformat:5 }}</span>
+                            {% if message.position_data.altitude is not None %} Alt: {{ message.position_data.altitude }}m {% endif %}
+                        </p>
+                    {% elif message.message_type == "telemetry" and message.telemetry_data %}
+                         <p class="mb-1">
+                            <strong>Telemetrie:</strong>
+                            {% if message.telemetry_data.battery_level is not None %}Batterie: {{ message.telemetry_data.battery_level }}% {% endif %}
+                            {% if message.telemetry_data.voltage is not None %}Spannung: {{ message.telemetry_data.voltage|floatformat:2 }}V {% endif %}
+                            {% if message.telemetry_data.air_util_tx is not None %}Air Util TX: {{ message.telemetry_data.air_util_tx|floatformat:3 }} {% endif %}
+                            {% if message.telemetry_data.channel_utilization is not None %}Kanal Auslastung: {{ message.telemetry_data.channel_utilization|floatformat:3 }} {% endif %}
+                        </p>
+                    {% elif message.raw_json_payload.payload %}
+                         <p class="mb-1"><small class="text-muted"><strong>Roh-Payload (Auszug):</strong> {{ message.raw_json_payload.payload|truncatewords:20 }}</small></p>
+                    {% else %}
+                         <p class="mb-1"><small class="text-muted">Kein spezifischer Text- oder Dateninhalt für die Schnellansicht.</small></p>
+                    {% endif %}
+                     <small class="text-muted">
+                         Gateway: {{ message.gateway_id_hex|default:"N/A" }} |
+                         MQTT-Hop: {{message.hops_away_mqtt|default:"?"}} |
+                         RSSI: {{message.rssi_mqtt|default:"N/A"}} |
+                         SNR: {{message.snr_mqtt|default:"N/A"}}
+                     </small>
+                </div>
+            {% endfor %}
+        </div>
+
+        {% comment %} Die Paginierung ist bereits in deinen partials vorhanden {% endcomment %}
+        {% include "mqtt_listener/partials/pagination.html" with page_obj=page_obj %}
+
+    {% else %}
+        <div class="alert alert-info mt-3" role="alert">
+            Keine Nachrichten für die aktuellen Filter gefunden.
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}
