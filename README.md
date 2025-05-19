@@ -1,4 +1,6 @@
-# Meshtastic Dashboard
+# Metrastics - Meshtastic Dashboard
+
+Watch it live: https://metrastics.com/
 
 A Django-based web application to monitor and visualize data from a Meshtastic network via MQTT.
 
