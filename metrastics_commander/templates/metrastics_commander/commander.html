@@ -1,0 +1,331 @@
+{% extends "metrastics_dashboard/base.html" %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Commander - Metrastics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <i class="bi bi-robot"></i> Commander Regeln
+                     <a href="{% url 'admin:metrastics_commander_commanderrule_add' %}" class="btn btn-success btn-sm float-end ms-2" target="_blank"><i class="bi bi-plus-circle"></i> Regel Hinzufügen (Admin)</a>
+                    <button class="btn btn-info btn-sm float-end me-2" onclick="fetchAllRules()"><i class="bi bi-arrow-clockwise"></i> Regeln Aktualisieren</button>
+                </div>
+                <div class="card-body">
+                    <p>Hier können Sie Regeln definieren, die automatisch auf eingehende Nachrichten reagieren. Für komplexere Operationen und das Hinzufügen neuer Regeln nutzen Sie bitte das <a href="{% url 'admin:index' %}metrastics_commander/commanderrule/" target="_blank">Django Admin Interface</a>.</p>
+
+                    <div class="alert alert-info" role="alert">
+                        <h5 class="alert-heading"><i class="bi bi-chat-dots-fill"></i> ChatGPT Integration</h5>
+                        <p>Sie können ChatGPT direkt über Meshtastic ansprechen. Senden Sie eine Nachricht, die mit <code>{{ chatgpt_trigger_command }}</code> beginnt, gefolgt von Ihrer Anfrage. Z.B.: <code>{{ chatgpt_trigger_command }} Wie ist das Wetter in Berlin?</code></p>
+                        <p>Die ChatGPT-Funktion wird vor den unten stehenden Regeln ausgewertet. Wenn der ChatGPT-Trigger erkannt wird, werden die anderen Regeln für diese Nachricht nicht ausgeführt.</p>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Trigger Phrase</th>
+                                    <th>Abgleich</th>
+                                    <th>Antwort Vorlage</th>
+                                    <th>Aktiv</th>
+                                    <th>Cooldown (s)</th>
+                                    <th>Letzte Aktualisierung</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="commanderRulesTableBody">
+                                {% for rule in rules %}
+                                <tr id="rule-row-{{ rule.id }}">
+                                    <td data-label="Name">{{ rule.name }}</td>
+                                    <td data-label="Trigger"><pre class="mb-0 rule-text-display">{{ rule.trigger_phrase }}</pre></td>
+                                    <td data-label="Abgleich">{{ rule.get_match_type_display }}</td>
+                                    <td data-label="Antwort"><pre class="mb-0 rule-text-display">{{ rule.response_template }}</pre></td>
+                                    <td data-label="Aktiv">
+                                        {% if rule.enabled %}
+                                            <span class="badge bg-success">Ja</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">Nein</span>
+                                        {% endif %}
+                                    </td>
+                                    <td data-label="Cooldown">{{ rule.cooldown_seconds }}</td>
+                                    <td data-label="Aktualisiert">{{ rule.updated_at|naturaltime }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary edit-rule-btn" data-rule-id="{{ rule.id }}"><i class="bi bi-pencil-fill"></i> Bearbeiten</button>
+                                        <button class="btn btn-sm btn-danger delete-rule-btn" data-rule-id="{{ rule.id }}"><i class="bi bi-trash-fill"></i> Löschen</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                {% if not rules %}
+                                <tr><td colspan="8" class="text-center">Noch keine Commander-Regeln definiert.</td></tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="editRuleModal" tabindex="-1" aria-labelledby="editRuleModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editRuleModalLabel">Commander Regel bearbeiten</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editRuleForm">
+                        {% csrf_token %}
+                        <input type="hidden" id="editRuleId" name="id">
+                        <div class="mb-3">
+                            <label for="editRuleName" class="form-label">Name</label>
+                            <input type="text" class="form-control" id="editRuleName" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editRuleTriggerPhrase" class="form-label">Trigger Phrase</label>
+                            <textarea class="form-control" id="editRuleTriggerPhrase" name="trigger_phrase" rows="3" required></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editRuleMatchType" class="form-label">Abgleichstyp</label>
+                            <select class="form-select" id="editRuleMatchType" name="match_type" required>
+                                {% for value, display_name in match_type_choices %}
+                                <option value="{{ value }}">{{ display_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editRuleResponseTemplate" class="form-label">Antwort Vorlage</label>
+                            <textarea class="form-control" id="editRuleResponseTemplate" name="response_template" rows="5" required></textarea>
+                            <small class="form-text text-muted">Verwenden Sie die unten aufgelisteten Platzhalter.</small>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="editRuleCooldownSeconds" class="form-label">Cooldown (Sekunden)</label>
+                                <input type="number" class="form-control" id="editRuleCooldownSeconds" name="cooldown_seconds" min="0" required>
+                            </div>
+                            <div class="col-md-6 mb-3 align-self-center">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="editRuleEnabled" name="enabled">
+                                    <label class="form-check-label" for="editRuleEnabled">Regel aktiviert</label>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                    <button type="button" class="btn btn-primary" id="saveRuleChangesBtn">Änderungen speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="row mt-4">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <i class="bi bi-tags-fill"></i> Verfügbare Platzhalter für Antwortvorlagen (Commander Regeln)
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Platzhalter</th>
+                                    <th>Beschreibung</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for p in placeholders %}
+                                <tr>
+                                    <td><code>{{ p.name }}</code></td>
+                                    <td>{{ p.desc }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                     <small class="text-muted">Hinweis: Wenn ein Wert für einen Platzhalter nicht verfügbar ist (z.B. keine Positionsdaten für den Sender), wird er durch "N/A" oder einen leeren String ersetzt.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+    .rule-text-display {
+        white-space: pre-wrap;
+        font-size: 0.9em;
+        max-height: 100px;
+        overflow-y: auto;
+        background-color: #f8f9fa;
+        padding: 5px;
+        border-radius: 3px;
+    }
+</style>
+<script>
+    const editRuleModal = new bootstrap.Modal(document.getElementById('editRuleModal'));
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    function formatRuleRow(rule) {
+        return `
+            <td data-label="Name">${escapeHtml(rule.name)}</td>
+            <td data-label="Trigger"><pre class="mb-0 rule-text-display">${escapeHtml(rule.trigger_phrase)}</pre></td>
+            <td data-label="Abgleich">${escapeHtml(getMatchTypeDisplay(rule.match_type))}</td>
+            <td data-label="Antwort"><pre class="mb-0 rule-text-display">${escapeHtml(rule.response_template)}</pre></td>
+            <td data-label="Aktiv">${rule.enabled ? '<span class="badge bg-success">Ja</span>' : '<span class="badge bg-danger">Nein</span>'}</td>
+            <td data-label="Cooldown">${escapeHtml(rule.cooldown_seconds)}</td>
+            <td data-label="Aktualisiert">${formatTimeAgo(rule.updated_at)}</td>
+            <td>
+                <button class="btn btn-sm btn-primary edit-rule-btn" data-rule-id="${rule.id}"><i class="bi bi-pencil-fill"></i> Bearbeiten</button>
+                <button class="btn btn-sm btn-danger delete-rule-btn" data-rule-id="${rule.id}"><i class="bi bi-trash-fill"></i> Löschen</button>
+            </td>
+        `;
+    }
+
+    const matchTypeChoices = {
+    {% for value, display_name in match_type_choices %}
+        "{{ value }}": "{{ display_name }}",
+    {% endfor %}
+    };
+
+    function getMatchTypeDisplay(matchTypeKey){
+        return matchTypeChoices[matchTypeKey] || matchTypeKey;
+    }
+
+    function fetchAllRules() {
+        const tableBody = $('#commanderRulesTableBody');
+        tableBody.html('<tr><td colspan="8" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Lade Regeln...</td></tr>');
+
+        $.ajax({
+            url: "{% url 'metrastics_commander:api_get_commander_rules' %}",
+            type: 'GET',
+            dataType: 'json',
+            success: function(rules) {
+                tableBody.empty();
+                if (rules && rules.length > 0) {
+                    rules.forEach(rule => {
+                        const row = $('<tr>').attr('id', `rule-row-${rule.id}`);
+                        row.html(formatRuleRow(rule));
+                        tableBody.append(row);
+                    });
+                } else {
+                    tableBody.html('<tr><td colspan="8" class="text-center">Noch keine Commander-Regeln definiert.</td></tr>');
+                }
+                attachButtonListeners();
+            },
+            error: function(xhr, status, error) {
+                tableBody.html('<tr><td colspan="8" class="text-center text-danger">Fehler beim Laden der Regeln.</td></tr>');
+                console.error("Error fetching rules:", status, error);
+            }
+        });
+    }
+
+    function attachButtonListeners() {
+        $('.edit-rule-btn').off('click').on('click', function() {
+            const ruleId = $(this).data('rule-id');
+            $.ajax({
+                url: `/commander/api/rules/${ruleId}/`,
+                type: 'GET',
+                success: function(rule) {
+                    $('#editRuleId').val(rule.id);
+                    $('#editRuleName').val(rule.name);
+                    $('#editRuleTriggerPhrase').val(rule.trigger_phrase);
+                    $('#editRuleMatchType').val(rule.match_type);
+                    $('#editRuleResponseTemplate').val(rule.response_template);
+                    $('#editRuleCooldownSeconds').val(rule.cooldown_seconds);
+                    $('#editRuleEnabled').prop('checked', rule.enabled);
+                    editRuleModal.show();
+                },
+                error: function() {
+                    alert('Fehler beim Laden der Regeldetails.');
+                }
+            });
+        });
+
+        $('.delete-rule-btn').off('click').on('click', function() {
+            const ruleId = $(this).data('rule-id');
+            if (confirm('Sind Sie sicher, dass Sie diese Regel löschen möchten?')) {
+                $.ajax({
+                    url: `/commander/api/rules/${ruleId}/delete/`,
+                    type: 'POST',
+                    headers: {"X-CSRFToken": csrftoken},
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            fetchAllRules();
+                            alert(response.message);
+                        } else {
+                            alert('Fehler: ' + response.message);
+                        }
+                    },
+                    error: function() {
+                        alert('Fehler beim Löschen der Regel.');
+                    }
+                });
+            }
+        });
+    }
+
+    $('#saveRuleChangesBtn').on('click', function() {
+        const ruleId = $('#editRuleId').val();
+        const ruleData = {
+            name: $('#editRuleName').val(),
+            trigger_phrase: $('#editRuleTriggerPhrase').val(),
+            match_type: $('#editRuleMatchType').val(),
+            response_template: $('#editRuleResponseTemplate').val(),
+            cooldown_seconds: $('#editRuleCooldownSeconds').val(),
+            enabled: $('#editRuleEnabled').is(':checked'),
+        };
+
+        $.ajax({
+            url: `/commander/api/rules/${ruleId}/update/`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(ruleData),
+            headers: {"X-CSRFToken": csrftoken},
+            success: function(response) {
+                if (response.status === 'success') {
+                    editRuleModal.hide();
+                    fetchAllRules();
+                    alert(response.message);
+                } else {
+                    alert('Fehler: ' + response.message);
+                }
+            },
+            error: function(xhr) {
+                 let errorMsg = 'Fehler beim Speichern der Regel.';
+                 if (xhr.responseJSON && xhr.responseJSON.message) {
+                     errorMsg = xhr.responseJSON.message;
+                 }
+                 alert(errorMsg);
+            }
+        });
+    });
+
+    $(document).ready(function() {
+        attachButtonListeners();
+    });
+</script>
+{% endblock %}

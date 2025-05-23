@@ -1,0 +1,108 @@
+{% extends "metrastics_dashboard/base.html" %}
+{% load static %}
+
+{% block title %}Nodes Map - Metrastics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <i class="bi bi-map-fill"></i> All Nodes on Map
+                </div>
+                <div class="card-body p-0">
+                    <div id="allNodesMap">
+                        <div class="d-flex justify-content-center align-items-center" style="height: 100%;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading map...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="card-footer text-muted">
+                    Nodes with available location data are shown. Last updated: <span id="mapLastUpdated">Never</span>.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allNodesMapInstance = null;
+    let nodeMarkersLayer = null;
+
+    function initializeAllNodesMap() {
+        // Set a default view, e.g., a central point or Europe/US
+        allNodesMapInstance = L.map('allNodesMap').setView([20, 0], 2); // Low zoom, centered globally
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 18,
+        }).addTo(allNodesMapInstance);
+
+        nodeMarkersLayer = L.layerGroup().addTo(allNodesMapInstance);
+        fetchAllNodesForMap();
+    }
+
+    function fetchAllNodesForMap() {
+        $('#mapLastUpdated').text('Fetching data...');
+        $.getJSON("{% url 'api_get_all_nodes' %}", function(nodes) {
+            nodeMarkersLayer.clearLayers(); // Clear existing markers before adding new ones
+            let nodesWithLocation = [];
+
+            nodes.forEach(node => {
+                if (node.latitude !== null && node.longitude !== null &&
+                    !isNaN(parseFloat(node.latitude)) && !isNaN(parseFloat(node.longitude))) {
+
+                    const lat = parseFloat(node.latitude);
+                    const lon = parseFloat(node.longitude);
+
+                    // Basic validation for coordinate ranges
+                    if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                        const marker = L.marker([lat, lon]);
+                        let popupContent = `<strong>${escapeHtml(getNodeName(node))}</strong> (${escapeHtml(node.node_id)})`;
+                        popupContent += `<br>HW: ${escapeHtml(formatHwModel(node.hw_model))}`;
+                        if (node.last_heard) {
+                             popupContent += `<br>Last Heard: ${escapeHtml(formatTimeAgo(node.last_heard))}`;
+                        }
+                        if (node.battery_level !== null || node.voltage !== null) {
+                             popupContent += `<br>Battery: ${formatBattery(node.battery_level, node.voltage)}`;
+                        }
+                        marker.bindPopup(popupContent);
+                        nodeMarkersLayer.addLayer(marker);
+                        nodesWithLocation.push([lat, lon]);
+                    } else {
+                        console.warn(`Node ${node.node_id} has invalid coordinates: Lat ${lat}, Lon ${lon}`);
+                    }
+                }
+            });
+
+            if (nodesWithLocation.length > 0) {
+                allNodesMapInstance.fitBounds(nodesWithLocation, { padding: [50, 50], maxZoom: 15 });
+            } else {
+                // If no nodes have location, keep the default view or zoom to a sensible default
+                allNodesMapInstance.setView([20,0], 2); // Reset to global view if no nodes found
+                console.info("No nodes with location data found to display on the map.");
+            }
+             $('#mapLastUpdated').text(new Date().toLocaleTimeString());
+        }).fail(function() {
+            console.error("Error loading nodes for the map.");
+            $('#mapLastUpdated').text('Error loading data.');
+            // Optionally display an error message on the map itself
+            $('#allNodesMap').html('<div class="alert alert-danger m-3">Could not load node data for the map.</div>');
+        });
+    }
+
+
+    $(document).ready(function() {
+        if ($('#allNodesMap').length) { // Check if the map container exists
+            initializeAllNodesMap();
+             // Refresh map data periodically (e.g., every 30 seconds)
+            setInterval(fetchAllNodesForMap, 30000);
+        }
+    });
+</script>
+{% endblock %}

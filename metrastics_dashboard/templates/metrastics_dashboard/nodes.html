@@ -1,0 +1,354 @@
+{% extends "metrastics_dashboard/base.html" %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Nodes - Metrastics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-diagram-3-fill"></i> All Nodes</span>
+                        <form class="d-flex" id="searchNodeForm">
+                            <input class="form-control me-2" type="search" placeholder="Search Nodes (Name, ID, HW)" aria-label="Search" id="nodeSearchInput">
+                            <button class="btn btn-outline-success" type="submit"><i class="bi bi-search"></i></button>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>ID</th>
+                                    <th>HW Model</th>
+                                    <th>Last Heard</th>
+                                    <th>Battery</th>
+                                    <th>SNR</th>
+                                    <th>RSSI</th>
+                                    <th>Position Time</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="allNodesTableBody">
+                                <tr><td colspan="9" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Loading nodes...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <nav aria-label="Node pagination">
+                        <ul class="pagination justify-content-center" id="nodePagination">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="nodeDetailModal" tabindex="-1" aria-labelledby="nodeDetailModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable"> <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="nodeDetailModalLabel">Node Details: <span id="modalNodeName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body node-detail-modal-body">
+        <div id="nodeDetailContentContainer">
+            <div class="text-center p-4"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allNodesData = [];
+    let currentNodesPage = 1;
+    const nodesPerPage = 15;
+    let nodeLeafletMap = null; // Variable to hold the map instance
+
+    function displayNodes(nodesToDisplay, page = 1) {
+        const nodeListTableBody = $('#allNodesTableBody');
+        nodeListTableBody.empty();
+
+        if (!nodesToDisplay || nodesToDisplay.length === 0) {
+            nodeListTableBody.html('<tr><td colspan="9" class="text-center">No nodes found matching your criteria.</td></tr>');
+            $('#nodePagination').empty();
+            return;
+        }
+
+        const startIndex = (page - 1) * nodesPerPage;
+        const endIndex = startIndex + nodesPerPage;
+        const paginatedNodes = nodesToDisplay.slice(startIndex, endIndex);
+
+        paginatedNodes.forEach(node => {
+            const row = `
+                <tr class="node-row" data-node-id="${escapeHtml(node.node_id)}" style="cursor:pointer;" title="Click to view details">
+                    <td>${escapeHtml(getNodeName(node))}</td>
+                    <td><code class="node-id-badge bg-light text-dark p-1 rounded">${escapeHtml(node.node_id)}</code></td>
+                    <td>${escapeHtml(formatHwModel(node.hw_model))}</td>
+                    <td>${escapeHtml(formatTimeAgo(node.last_heard))}</td>
+                    <td class="text-center">${formatBattery(node.battery_level, node.voltage)}</td>
+                    <td class="text-center">${node.snr !== null ? escapeHtml(node.snr.toFixed(1)) : 'N/A'}</td>
+                    <td class="text-center">${node.rssi !== null ? escapeHtml(node.rssi) : 'N/A'}</td>
+                    <td>${node.position_time ? escapeHtml(formatTimeAgo(node.position_time)) : 'N/A'}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary view-details-btn" data-node-id="${escapeHtml(node.node_id)}">
+                            <i class="bi bi-eye"></i> Details
+                        </button>
+                    </td>
+                </tr>`;
+            nodeListTableBody.append(row);
+        });
+        renderNodePagination(nodesToDisplay.length, page);
+    }
+
+    function renderNodePagination(totalNodes, currentPage) {
+        const paginationUl = $('#nodePagination');
+        paginationUl.empty();
+        const totalPages = Math.ceil(totalNodes / nodesPerPage);
+
+        if (totalPages <= 1) return;
+
+        paginationUl.append(`<li class="page-item ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a></li>`);
+        for (let i = 1; i <= totalPages; i++) {
+            paginationUl.append(`<li class="page-item ${i === currentPage ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`);
+        }
+        paginationUl.append(`<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage + 1}">Next</a></li>`);
+
+        $('.page-link').on('click', function(e) {
+            e.preventDefault();
+            const page = parseInt($(this).data('page'));
+            if (!isNaN(page) && page > 0 && page <= totalPages) {
+                currentNodesPage = page;
+                const searchTerm = $('#nodeSearchInput').val().toLowerCase();
+                const filteredNodes = searchTerm ? filterNodes(searchTerm) : allNodesData;
+                displayNodes(filteredNodes, currentNodesPage);
+            }
+        });
+    }
+
+    function fetchAllNodes() {
+        $('#allNodesTableBody').html('<tr><td colspan="9" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Fetching all nodes...</td></tr>');
+        $.getJSON("{% url 'api_get_all_nodes' %}", function(data) {
+            allNodesData = data;
+            currentNodesPage = 1;
+            displayNodes(allNodesData, currentNodesPage);
+        }).fail(function() {
+            $('#allNodesTableBody').html('<tr><td colspan="9" class="text-center text-danger">Error loading nodes. Please try again later.</td></tr>');
+        });
+    }
+
+    function filterNodes(searchTerm) {
+        if (!searchTerm) return allNodesData;
+        return allNodesData.filter(node => {
+            const longName = (node.long_name || "").toLowerCase();
+            const shortName = (node.short_name || "").toLowerCase();
+            const nodeId = (node.node_id || "").toLowerCase();
+            const hwModel = (node.hw_model || "").toLowerCase();
+            return longName.includes(searchTerm) || shortName.includes(searchTerm) || nodeId.includes(searchTerm) || hwModel.includes(searchTerm);
+        });
+    }
+
+    $('#searchNodeForm').on('submit', function(event) {
+        event.preventDefault();
+        const searchTerm = $('#nodeSearchInput').val().toLowerCase();
+        const filtered = filterNodes(searchTerm);
+        currentNodesPage = 1;
+        displayNodes(filtered, currentNodesPage);
+    });
+
+    function renderDetailItem(label, value, isJson = false) {
+        let displayValue;
+        if (value === null || typeof value === 'undefined' || String(value).trim() === "") {
+            displayValue = '<span class="text-muted">N/A</span>';
+        } else if (isJson) {
+            displayValue = renderJsonPayload(value, label); // Pass label for title in renderJsonPayload
+            return displayValue; // renderJsonPayload returns full HTML including heading
+        } else {
+            displayValue = escapeHtml(value);
+        }
+        return `<div class="row mb-2"><dt class="col-sm-4 col-md-3 text-truncate">${escapeHtml(label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()))}:</dt><dd class="col-sm-8 col-md-9">${displayValue}</dd></div>`;
+    }
+
+
+    function populateNodeModal(nodeId) {
+        const modalContentContainer = $('#nodeDetailContentContainer');
+        const modalNodeName = $('#modalNodeName');
+        modalContentContainer.html('<div class="text-center p-4"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        modalNodeName.text('Loading...');
+
+        if (nodeLeafletMap) {
+            nodeLeafletMap.remove();
+            nodeLeafletMap = null;
+        }
+
+        $.getJSON(`/dashboard/api/node_detail/${encodeURIComponent(nodeId)}/`, function(details) {
+            modalNodeName.text(escapeHtml(details.long_name || details.short_name || details.node_id));
+
+            let mapHtml = '';
+            if (details.latitude && details.longitude) {
+                mapHtml = `
+                    <div id="nodeMapContainer" class="mb-3">
+                        <h6><i class="bi bi-geo-alt-fill"></i> Last Known Location</h6>
+                        <div id="nodeMap" style="height: 300px; width: 100%;"></div>
+                    </div>`;
+            }
+
+            const tabsHtml = `
+                ${mapHtml}
+                <ul class="nav nav-tabs" id="nodeDetailTabs" role="tablist">
+                    <li class="nav-item" role="presentation"><button class="nav-link active" id="general-tab" data-bs-toggle="tab" data-bs-target="#general" type="button" role="tab">General</button></li>
+                    <li class="nav-item" role="presentation"><button class="nav-link" id="status-tab" data-bs-toggle="tab" data-bs-target="#status" type="button" role="tab">Status</button></li>
+                    <li class="nav-item" role="presentation"><button class="nav-link" id="position-ext-tab" data-bs-toggle="tab" data-bs-target="#position-ext" type="button" role="tab">Position</button></li>
+                    <li class="nav-item" role="presentation"><button class="nav-link" id="telemetry-ext-tab" data-bs-toggle="tab" data-bs-target="#telemetry-ext" type="button" role="tab">Telemetry</button></li>
+                    <li class="nav-item" role="presentation"><button class="nav-link" id="raw-tab" data-bs-toggle="tab" data-bs-target="#raw" type="button" role="tab">Raw Data</button></li>
+                </ul>
+                <div class="tab-content p-0" id="nodeDetailTabsContent">
+                    <div class="tab-pane fade show active p-3" id="general" role="tabpanel"></div>
+                    <div class="tab-pane fade p-3" id="status" role="tabpanel"></div>
+                    <div class="tab-pane fade p-3" id="position-ext" role="tabpanel"></div>
+                    <div class="tab-pane fade p-3" id="telemetry-ext" role="tabpanel"></div>
+                    <div class="tab-pane fade p-3" id="raw" role="tabpanel"></div>
+                </div>`;
+            modalContentContainer.html(tabsHtml);
+
+            // Populate Tabs
+            let generalHtml = renderDetailItem('Node ID', details.node_id) +
+                              renderDetailItem('Node Num', details.node_num) +
+                              renderDetailItem('Long Name', details.long_name) +
+                              renderDetailItem('Short Name', details.short_name) +
+                              renderDetailItem('MAC Address', details.macaddr) +
+                              renderDetailItem('Hardware Model', formatHwModel(details.hw_model)) +
+                              renderDetailItem('Firmware Version', details.firmware_version) +
+                              renderDetailItem('Role', details.role) +
+                              renderDetailItem('Is Local', details.is_local ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') +
+                              renderDetailItem('Created At', formatTimeAgo(details.created_at)) +
+                              renderDetailItem('Updated At', formatTimeAgo(details.updated_at));
+            $('#general').html(generalHtml);
+
+            let statusHtml = renderDetailItem('Last Heard', formatTimeAgo(details.last_heard)) +
+                             renderDetailItem('Battery', formatBattery(details.battery_level, details.voltage)) +
+                             (details.battery_level === null || details.battery_level === 255 ? renderDetailItem('Voltage', details.voltage ? details.voltage.toFixed(2) + 'V' : 'N/A') : '') + // Show voltage if powered or battery level unknown
+                             renderDetailItem('Channel Utilization', details.channel_utilization !== null ? details.channel_utilization.toFixed(2) + '%' : 'N/A') +
+                             renderDetailItem('Air Util TX', details.air_util_tx !== null ? details.air_util_tx.toFixed(2) + '%' : 'N/A') +
+                             renderDetailItem('Uptime', details.uptime_seconds !== null ? moment.duration(details.uptime_seconds, 'seconds').humanize() : 'N/A') + // Requires Moment.js or similar for humanize
+                             renderDetailItem('SNR', details.snr !== null ? details.snr.toFixed(1) : 'N/A') +
+                             renderDetailItem('RSSI', details.rssi);
+            $('#status').html(statusHtml);
+
+            // If uptime_seconds is available, format it. (Using a simple formatter here, can be improved with a library like Moment.js)
+            if (details.uptime_seconds !== null) {
+                 const uptime = details.uptime_seconds;
+                 const d = Math.floor(uptime / (3600*24));
+                 const h = Math.floor(uptime % (3600*24) / 3600);
+                 const m = Math.floor(uptime % 3600 / 60);
+                 const s = Math.floor(uptime % 60);
+                 let uptimeStr = '';
+                 if (d > 0) uptimeStr += `${d}d `;
+                 if (h > 0) uptimeStr += `${h}h `;
+                 if (m > 0) uptimeStr += `${m}m `;
+                 if (s > 0 || uptimeStr === '') uptimeStr += `${s}s`;
+                 $('#status').find('dd:contains("N/A")').filter(function() { return $(this).prev('dt').text().includes("Uptime"); }).html(escapeHtml(uptimeStr.trim() || 'N/A'));
+            }
+
+
+            let positionHtml = renderDetailItem('Latitude', details.latitude !== null ? details.latitude.toFixed(6) : 'N/A') +
+                               renderDetailItem('Longitude', details.longitude !== null ? details.longitude.toFixed(6) : 'N/A') +
+                               renderDetailItem('Altitude', details.altitude !== null ? details.altitude + 'm' : 'N/A') +
+                               renderDetailItem('Position Time', formatTimeAgo(details.position_time));
+            if (details.position_info && Object.keys(details.position_info).length > 0) {
+                positionHtml += '<hr>' + renderDetailItem('Position Packet Details', details.position_info, true);
+            }
+            $('#position-ext').html(positionHtml);
+
+            let telemetryHtml = "";
+            if (details.device_metrics_info && Object.keys(details.device_metrics_info).length > 0) {
+                 telemetryHtml += renderDetailItem('Device Metrics', details.device_metrics_info, true);
+            }
+            if (details.environment_metrics_info && Object.keys(details.environment_metrics_info).length > 0) {
+                 telemetryHtml += (telemetryHtml ? "<hr>" : "") + renderDetailItem('Environment Metrics', details.environment_metrics_info, true);
+            }
+             telemetryHtml += (telemetryHtml ? "<hr>" : "") + renderDetailItem('Telemetry Update Time', formatTimeAgo(details.telemetry_time));
+            $('#telemetry-ext').html(telemetryHtml || '<p class="text-muted"><em>No detailed telemetry data available.</em></p>');
+
+
+            let rawHtml = renderDetailItem('User Info (Raw)', details.user_info, true) +
+                          '<hr>' + renderDetailItem('Module Config (Raw)', details.module_config_info, true) +
+                          '<hr>' + renderDetailItem('Channel Info (Raw)', details.channel_info, true);
+            $('#raw').html(rawHtml);
+
+            // Initialize map if coordinates are available
+            if (details.latitude && details.longitude) {
+                $('#nodeMapContainer').show();
+                if (nodeLeafletMap) { // If map was initialized from a previous modal, remove it
+                    nodeLeafletMap.remove();
+                }
+                nodeLeafletMap = L.map('nodeMap').setView([details.latitude, details.longitude], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(nodeLeafletMap);
+                L.marker([details.latitude, details.longitude]).addTo(nodeLeafletMap)
+                    .bindPopup(escapeHtml(details.long_name || details.short_name || details.node_id))
+                    .openPopup();
+                // Ensure map resizes correctly after modal is shown
+                 setTimeout(() => { if(nodeLeafletMap) nodeLeafletMap.invalidateSize(); }, 200);
+
+            } else {
+                $('#nodeMapContainer').hide();
+            }
+
+        }).fail(function() {
+            modalNodeName.text('Error');
+            modalContentContainer.html('<div class="alert alert-danger">Could not load node details. Please try again.</div>');
+        });
+    }
+
+    // Event listener for when the modal is fully shown
+    var nodeDetailModalEl = document.getElementById('nodeDetailModal');
+    if (nodeDetailModalEl) {
+        nodeDetailModalEl.addEventListener('shown.bs.modal', function () {
+            if (nodeLeafletMap) {
+                nodeLeafletMap.invalidateSize();
+            }
+            // Activate the first tab
+            var firstTabEl = document.querySelector('#nodeDetailTabs li:first-child button');
+            if (firstTabEl) {
+                var tab = new bootstrap.Tab(firstTabEl);
+                tab.show();
+            }
+        });
+        // Cleanup map when modal is hidden to prevent issues
+        nodeDetailModalEl.addEventListener('hidden.bs.modal', function () {
+            if (nodeLeafletMap) {
+                nodeLeafletMap.remove();
+                nodeLeafletMap = null;
+            }
+             $('#nodeDetailContentContainer').html('<div class="text-center p-4"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>'); // Reset content
+        });
+    }
+
+
+    $('#allNodesTableBody').on('click', '.node-row, .view-details-btn', function(event) {
+        event.stopPropagation(); // Prevent row click from firing if button is clicked, though redundant with specific targeting
+        const nodeId = $(this).closest('.node-row').data('node-id') || $(this).data('node-id');
+        if (nodeId) {
+            populateNodeModal(nodeId);
+            var nodeDetailModalInstance = new bootstrap.Modal(document.getElementById('nodeDetailModal'));
+            nodeDetailModalInstance.show();
+        }
+    });
+
+    $(document).ready(function() {
+        fetchAllNodes();
+    });
+</script>
+{% endblock %}

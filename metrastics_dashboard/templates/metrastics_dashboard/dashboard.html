@@ -1,0 +1,431 @@
+{% extends "metrastics_dashboard/base.html" %}
+{% load static %}
+{% load humanize %} {% block title %}Meshtastic Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col-md-8"> <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-broadcast-pin"></i> Listener & Local Node Status</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="fetchConnectionStatus()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Status
+                    </button>
+                </div>
+                <div class="card-body" id="connectionStatusCardBody">
+                    <p><strong>Listener Status:</strong> <span id="listenerStatus"><span class="status-indicator status-initializing"></span> Initializing...</span></p>
+                    <div id="localNodeInfo" style="display: none;">
+                        <p><strong>Local Node:</strong> <span id="localNodeName">N/A</span> (<code id="localNodeId" class="node-id-badge">N/A</code>)</p>
+                        <p><strong>Channels Mapped:</strong> <span id="localNodeChannels">N/A</span></p>
+                    </div>
+                    <div id="listenerError" class="alert alert-danger" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4"> <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-reception-4"></i> Avg Signals (12h)</span>
+                     <button class="btn btn-sm btn-outline-secondary" onclick="fetchAverageSignalStats()">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body" id="averageSignalStatsBody">
+                    <p><strong>Avg. SNR:</strong> <span id="avgSnr">Loading...</span></p>
+                    <p><strong>Avg. RSSI:</strong> <span id="avgRssi">Loading...</span></p>
+                    <small class="text-muted">Based on <span id="avgSignalPacketCount">N/A</span> packets.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4" id="countersRow">
+        <div class="col text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div> Loading counters...</div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-map-fill"></i> Node Map Overview</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="fetchNodesForDashboardMap()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Map
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div id="dashboardNodeMap" style="height: 400px; width: 100%;">
+                         <div class="d-flex justify-content-center align-items-center" style="height: 100%;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading map...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-lg-7 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-diagram-3"></i> Nodes</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="fetchNodeList()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Nodes
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="table table-sm table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>ID</th>
+                                    <th>HW</th>
+                                    <th>Last Heard</th>
+                                    <th>Batt.</th>
+                                    <th>SNR</th>
+                                    <th>RSSI</th>
+                                    <th>Pos. Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="nodeListTableBody">
+                                <tr><td colspan="8" class="text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div> Loading nodes...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-activity"></i> Live Packet Feed</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="fetchLivePackets()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Feed
+                    </button>
+                </div>
+                <div class="card-body live-feed" id="livePacketFeed">
+                    <div class="text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div> Loading packets...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // formatTimeAgo and getNodeName are in base.html and available globally
+
+    function fetchCounters() {
+        $.getJSON("{% url 'api_counters' %}", function(data) {
+            const countersRow = $('#countersRow');
+            countersRow.empty(); // Clear previous counters or loading spinner
+
+            const counterItems = [
+                { label: 'Total Packets', value: data.total_packets, icon: 'bi-collection-fill', color: 'primary' },
+                { label: 'Nodes', value: data.total_nodes, icon: 'bi-diagram-3-fill', color: 'info' },
+                { label: 'Messages', value: data.message_packets, icon: 'bi-chat-dots-fill', color: 'success' },
+                { label: 'Positions', value: data.position_packets, icon: 'bi-geo-alt-fill', color: 'warning' },
+                { label: 'Telemetry', value: data.telemetry_packets, icon: 'bi-speedometer', color: 'danger' },
+                { label: 'User Info', value: data.userinfo_packets, icon: 'bi-person-badge-fill', color: 'secondary' },
+                { label: 'Traceroutes', value: data.traceroute_packets, icon: 'bi-signpost-split-fill', color: 'dark' } // Changed from Other
+            ];
+
+            counterItems.forEach(item => {
+                const col = $('<div>').addClass('col-lg col-md-4 col-sm-6 mb-3');
+                const card = $('<div>').addClass('card card-counter shadow-sm');
+                const cardBody = $('<div>').addClass('card-body');
+                const icon = $('<i>').addClass(item.icon + ' text-' + item.color).css('font-size', '1.5rem');
+                const value = $('<h3>').text(item.value !== undefined ? item.value : 'N/A');
+                const label = $('<p>').text(item.label);
+                cardBody.append(icon, value, label);
+                card.append(cardBody);
+                col.append(card);
+                countersRow.append(col);
+            });
+        }).fail(function() {
+            $('#countersRow').html('<div class="col text-center text-danger">Error loading counters.</div>');
+        });
+    }
+
+    function fetchNodeList() {
+        $.getJSON("{% url 'api_nodes' %}", function(data) {
+            const nodeListTableBody = $('#nodeListTableBody');
+            nodeListTableBody.empty(); // Clear previous data or loading spinner
+            if (data.length === 0) {
+                nodeListTableBody.html('<tr><td colspan="8" class="text-center">No nodes found.</td></tr>');
+                return;
+            }
+            data.forEach(node => {
+                const row = `<tr>
+                    <td>${escapeHtml(getNodeName(node))}</td>
+                    <td><code class="node-id-badge bg-light text-dark p-1 rounded">${escapeHtml(node.node_id)}</code></td>
+                    <td>${escapeHtml(formatHwModel(node.hw_model))}</td>
+                    <td>${escapeHtml(formatTimeAgo(node.last_heard))}</td>
+                    <td class="text-center">${formatBattery(node.battery_level, node.voltage)}</td>
+                    <td class="text-center">${node.snr !== null ? escapeHtml(node.snr.toFixed(1)) : 'N/A'}</td>
+                    <td class="text-center">${node.rssi !== null ? escapeHtml(node.rssi) : 'N/A'}</td>
+                    <td>${node.position_time ? escapeHtml(formatTimeAgo(node.position_time)) : 'N/A'}</td>
+                </tr>`;
+                nodeListTableBody.append(row);
+            });
+        }).fail(function() {
+            $('#nodeListTableBody').html('<tr><td colspan="8" class="text-center text-danger">Error loading nodes.</td></tr>');
+        });
+    }
+
+    function fetchLivePackets() {
+        $.getJSON("{% url 'api_live_packets' %}", function(data) {
+            const livePacketFeed = $('#livePacketFeed');
+            livePacketFeed.empty(); // Clear previous data or loading spinner
+            if (data.length === 0) {
+                livePacketFeed.html('<div class="text-center">No recent packets.</div>');
+                return;
+            }
+            data.forEach(packet => {
+                let fromNodeDisplay = packet.from_node_id_str || 'N/A';
+                if (packet.from_node_info) {
+                    fromNodeDisplay = getNodeName(packet.from_node_info);
+                }
+                let toNodeDisplay = packet.to_node_id_str || 'Broadcast';
+                 if (packet.to_node_id_str === '^all' || !packet.to_node_id_str) {
+                    toNodeDisplay = '<i class="bi bi-broadcast"></i> All';
+                } else if (packet.to_node_info) {
+                    toNodeDisplay = getNodeName(packet.to_node_info);
+                }
+
+
+                let packetDetail = '';
+                if (packet.packet_type === 'Message' && packet.decoded_json && typeof packet.decoded_json.payload === 'string') { // Ensure payload is string
+                    packetDetail = packet.decoded_json.payload;
+                     if (packetDetail.length > 50) packetDetail = packetDetail.substring(0, 50) + "...";
+                } else if (packet.packet_type === 'Position' && packet.decoded_json && packet.decoded_json.position) {
+                    const pos = packet.decoded_json.position;
+                    const lat = pos.latitudeI ? (pos.latitudeI / 1e7).toFixed(4) : (pos.latitude ? pos.latitude.toFixed(4) : 'N/A');
+                    const lon = pos.longitudeI ? (pos.longitudeI / 1e7).toFixed(4) : (pos.longitude ? pos.longitude.toFixed(4) : 'N/A');
+                    packetDetail = `Lat: ${lat}, Lon: ${lon}`;
+                } else {
+                    packetDetail = packet.portnum || 'Unknown data';
+                }
+
+
+                const typeBadgeColor = {
+                    'Message': 'bg-success',
+                    'Position': 'bg-warning text-dark',
+                    'Telemetry': 'bg-info text-dark',
+                    'User Info': 'bg-secondary',
+                    'Routing': 'bg-primary',
+                    'Traceroute': 'bg-primary', // Can use same as routing or a new one
+                    'Encrypted': 'bg-dark',
+                    'Unknown': 'bg-light text-dark',
+                    'Other': 'bg-light text-dark'
+                };
+                const badgeColor = typeBadgeColor[packet.packet_type] || 'bg-secondary';
+
+                const feedItem = `
+                    <div class="mb-2 p-2 border rounded shadow-sm">
+                        <div>
+                            <small class="text-muted">${formatTimeAgo(packet.timestamp)}</small>
+                            <span class="badge ${badgeColor} packet-type-badge float-end">${escapeHtml(packet.packet_type)}</span>
+                        </div>
+                        <div>
+                            <strong title="${escapeHtml(packet.from_node_id_str || '')}">${escapeHtml(fromNodeDisplay)}</strong>
+                            <i class="bi bi-arrow-right-short"></i>
+                            <strong title="${escapeHtml(packet.to_node_id_str || '')}">${toNodeDisplay}</strong>
+                        </div>
+                        <div style="font-size: 0.9em;"><em>${escapeHtml(packetDetail)}</em></div>
+                        <div class="mt-1">
+                             <span class="badge bg-light text-dark rssi-snr-badge">Ch: ${packet.channel !== null ? escapeHtml(packet.channel) : 'N/A'}</span>
+                             <span class="badge bg-light text-dark rssi-snr-badge">SNR: ${packet.rx_snr !== null ? escapeHtml(packet.rx_snr.toFixed(1)) : 'N/A'}</span>
+                             <span class="badge bg-light text-dark rssi-snr-badge">RSSI: ${packet.rx_rssi !== null ? escapeHtml(packet.rx_rssi) : 'N/A'}</span>
+                        </div>
+                    </div>`;
+                livePacketFeed.append(feedItem);
+            });
+        }).fail(function() {
+            $('#livePacketFeed').html('<div class="text-center text-danger">Error loading packet feed.</div>');
+        });
+    }
+
+    function fetchConnectionStatus() {
+        $.getJSON("{% url 'api_connection_status' %}", function(data) {
+            const listenerStatus = $('#listenerStatus');
+            const localNodeInfoDiv = $('#localNodeInfo');
+            const listenerErrorDiv = $('#listenerError');
+
+            let statusClass = 'status-initializing';
+            let statusText = data.status || 'Unknown';
+            if (data.status === 'Connected') statusClass = 'status-connected';
+            else if (data.status === 'Connecting') statusClass = 'status-connecting';
+            else if (data.status === 'Disconnected') statusClass = 'status-disconnected';
+            else if (data.status === 'Error') statusClass = 'status-error';
+
+            listenerStatus.html(`<span class="status-indicator ${statusClass}"></span> ${escapeHtml(statusText)}`);
+
+            if (data.error) {
+                listenerErrorDiv.text(data.error).show();
+            } else {
+                listenerErrorDiv.hide();
+            }
+
+            if (data.local_node_info && data.local_node_info.node_id) {
+                $('#localNodeName').text(escapeHtml(data.local_node_info.name || 'N/A'));
+                $('#localNodeId').text(escapeHtml(data.local_node_info.node_id));
+                let channelsText = 'N/A';
+                // Ensure channel_map is treated as an object, not a string, before processing
+                let channelMapData = data.local_node_info.channel_map;
+                if (typeof channelMapData === 'string') {
+                    try {
+                        channelMapData = JSON.parse(channelMapData);
+                    } catch (e) {
+                        console.warn("Could not parse local_node_channel_map_json string:", e);
+                        channelMapData = {};
+                    }
+                }
+
+                if (channelMapData && typeof channelMapData === 'object' && Object.keys(channelMapData).length > 0) {
+                    channelsText = Object.entries(channelMapData)
+                                        .map(([id, index]) => `ID ${escapeHtml(id)} -> Index ${escapeHtml(index)}`)
+                                        .join(', ');
+                }
+                $('#localNodeChannels').text(channelsText);
+                localNodeInfoDiv.show();
+            } else {
+                localNodeInfoDiv.hide();
+            }
+        }).fail(function() {
+            $('#listenerStatus').html('<span class="status-indicator status-error"></span> Error fetching status');
+            $('#listenerError').text('Could not connect to the status API.').show();
+            $('#localNodeInfo').hide();
+        });
+    }
+
+    function fetchAverageSignalStats() {
+        $.getJSON("{% url 'api_average_signal_stats' %}", function(data) {
+            const avgSnrSpan = $('#avgSnr');
+            const avgRssiSpan = $('#avgRssi');
+            const packetCountSpan = $('#avgSignalPacketCount');
+
+            if (data.average_snr !== null) {
+                avgSnrSpan.text(data.average_snr.toFixed(2));
+            } else {
+                avgSnrSpan.text('N/A');
+            }
+
+            if (data.average_rssi !== null) {
+                avgRssiSpan.text(data.average_rssi.toFixed(2));
+            } else {
+                avgRssiSpan.text('N/A');
+            }
+            packetCountSpan.text(data.packet_count_for_avg);
+
+        }).fail(function() {
+            $('#avgSnr').text('Error');
+            $('#avgRssi').text('Error');
+            $('#avgSignalPacketCount').text('0');
+             $('#averageSignalStatsBody').find('small.text-muted').append(' <span class="text-danger">(Error fetching)</span>');
+        });
+    }
+
+    // --- Dashboard Map Functions ---
+    let dashboardMapInstance = null;
+    let dashboardNodeMarkersLayer = null;
+
+    function initializeDashboardMap() {
+        if ($('#dashboardNodeMap').length === 0) return;
+        if (dashboardMapInstance) {
+            if(dashboardNodeMarkersLayer) dashboardNodeMarkersLayer.clearLayers();
+            fetchNodesForDashboardMap(); // Fetch data if map already exists
+            return;
+        }
+
+        // Show spinner before map initialization
+        $('#dashboardNodeMap .spinner-border').show();
+
+        try {
+            dashboardMapInstance = L.map('dashboardNodeMap').setView([20, 0], 2); // Default global view
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 18,
+            }).addTo(dashboardMapInstance);
+
+            dashboardNodeMarkersLayer = L.layerGroup().addTo(dashboardMapInstance);
+            fetchNodesForDashboardMap(); // Initial data fetch
+        } catch (e) {
+            console.error("Error initializing dashboard map:", e);
+             $('#dashboardNodeMap').html('<div class="alert alert-danger m-2 p-2">Map initialization failed. Is Leaflet loaded?</div>');
+        }
+    }
+
+    function fetchNodesForDashboardMap() {
+        if (!dashboardMapInstance || !dashboardNodeMarkersLayer) {
+            if ($('#dashboardNodeMap').length && !dashboardMapInstance) {
+                // console.log("Map not ready, attempting to initialize first in fetchNodesForDashboardMap");
+                initializeDashboardMap(); // This will call fetchNodesForDashboardMap again after init
+            } else {
+                // console.warn("Dashboard map or marker layer not initialized. Cannot fetch nodes.");
+            }
+            return;
+        }
+        $('#dashboardNodeMap .spinner-border').show(); // Show spinner on refresh
+
+        $.getJSON("{% url 'api_get_all_nodes' %}", function(nodes) {
+            dashboardNodeMarkersLayer.clearLayers();
+            let nodesWithLocation = [];
+
+            nodes.forEach(node => {
+                if (node.latitude !== null && node.longitude !== null &&
+                    !isNaN(parseFloat(node.latitude)) && !isNaN(parseFloat(node.longitude))) {
+
+                    const lat = parseFloat(node.latitude);
+                    const lon = parseFloat(node.longitude);
+
+                    if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                        const marker = L.marker([lat, lon]);
+                        let popupContent = `<strong>${escapeHtml(getNodeName(node))}</strong> <br><code style="font-size:0.8em;">${escapeHtml(node.node_id)}</code>`;
+                        if (node.last_heard) {
+                             popupContent += `<br><small>Heard: ${escapeHtml(formatTimeAgo(node.last_heard))}</small>`;
+                        }
+                        marker.bindPopup(popupContent);
+                        dashboardNodeMarkersLayer.addLayer(marker);
+                        nodesWithLocation.push([lat, lon]);
+                    }
+                }
+            });
+
+            if (nodesWithLocation.length > 0) {
+                dashboardMapInstance.fitBounds(nodesWithLocation, { padding: [40, 40], maxZoom: 14, animate: false });
+            } else {
+                dashboardMapInstance.setView([20,0], 2); // Reset to global view if no nodes
+            }
+             $('#dashboardNodeMap .spinner-border').hide(); // Hide spinner after loading
+             // console.log("Dashboard map updated.");
+             // Invalidate map size in case it was hidden or resized
+             setTimeout(() => { if(dashboardMapInstance) dashboardMapInstance.invalidateSize() }, 100);
+        }).fail(function() {
+            console.error("Error loading nodes for the dashboard map.");
+            $('#dashboardNodeMap').html('<div class="alert alert-danger m-2 p-2">Error loading map data. Try refreshing.</div>');
+        });
+    }
+    // --- End Dashboard Map Functions ---
+
+
+    $(document).ready(function() {
+        fetchConnectionStatus();
+        fetchCounters();
+        fetchNodeList();
+        fetchLivePackets();
+        fetchAverageSignalStats();
+        initializeDashboardMap(); // Initialize the new dashboard map
+
+        setInterval(fetchConnectionStatus, 10000); // Refresh status every 10 seconds
+        setInterval(fetchCounters, 30000);      // Refresh counters every 30 seconds
+        setInterval(fetchNodeList, 30000);      // Refresh node list every 30 seconds
+        setInterval(fetchLivePackets, 5000);    // Refresh packet feed every 5 seconds
+        setInterval(fetchAverageSignalStats, 60000 * 5); // Refresh average signals every 5 minutes
+        setInterval(fetchNodesForDashboardMap, 60000 * 2); // Refresh dashboard map every 2 minutes
+    });
+</script>
+{% endblock %}

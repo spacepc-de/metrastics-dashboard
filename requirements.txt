@@ -1,3 +1,7 @@
-Django>=3.2,<5.0  # Überprüfen Sie Ihre Django-Version
-psycopg2-binary
-paho-mqtt
+Django
+meshtastic==2.6.3
+Flask
+requests # Wird von process_commander_rules benötigt, um den HTTP-Request zu senden
+python-dotenv
+dj-database-url
+openai

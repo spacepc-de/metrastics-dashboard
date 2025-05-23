@@ -1,0 +1,74 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+local_settings.py
+*.rdb
+*.pyc
+
+# Static files (if you collect them locally and don't want to track them)
+# /staticfiles/
+# /media/
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Virtualenv
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+pytest_cache/
+.pytest_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Celery
+celerybeat-schedule
+
+# Sass
+.sass-cache/
+.node-sass/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Other
+*.bak
+*.tmp
