@@ -138,7 +138,7 @@
 
     function fetchAllNodes() {
         $('#allNodesTableBody').html('<tr><td colspan="9" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Fetching all nodes...</td></tr>');
-        $.getJSON("{% url 'api_get_all_nodes' %}", function(data) {
+        $.getJSON("{% url 'metrastics_dashboard:api_get_all_nodes' %}", function(data) {
             allNodesData = data;
             currentNodesPage = 1;
             displayNodes(allNodesData, currentNodesPage);

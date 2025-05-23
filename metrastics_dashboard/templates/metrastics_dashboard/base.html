@@ -113,20 +113,20 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{% url 'dashboard' %}"><i class="bi bi-router-fill"></i> Metrastics</a>
+            <a class="navbar-brand" href="{% url 'metrastics_dashboard:dashboard' %}"><i class="bi bi-router-fill"></i> Metrastics</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}" aria-current="page" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}" aria-current="page" href="{% url 'metrastics_dashboard:dashboard' %}"><i class="bi bi-speedometer2"></i> Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'nodes_page' %}active{% endif %}" href="{% url 'nodes_page' %}"><i class="bi bi-diagram-3"></i> Nodes</a>
+                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'nodes_page' %}active{% endif %}" href="{% url 'metrastics_dashboard:nodes_page' %}"><i class="bi bi-diagram-3"></i> Nodes</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'map_page' %}active{% endif %}" href="{% url 'map_page' %}"><i class="bi bi-map-fill"></i> Karte</a>
+                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'map_page' %}active{% endif %}" href="{% url 'metrastics_dashboard:map_page' %}"><i class="bi bi-map-fill"></i> Map</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_commander' and request.resolver_match.url_name == 'commander_page' %}active{% endif %}" href="{% url 'metrastics_commander:commander_page' %}"><i class="bi bi-robot"></i> Commander</a>

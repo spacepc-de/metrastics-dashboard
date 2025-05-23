@@ -206,3 +206,19 @@ def api_average_signal_stats(request):
         'packet_count_for_avg': relevant_packets.count()
     }
     return JsonResponse(data)
+
+# Hinzugefügte View-Funktion für den Listener-Neustart
+# from django.contrib.admin.views.decorators import staff_member_required # Beispiel für Zugriffsbeschränkung
+# @staff_member_required
+def api_request_listener_restart_view(request):
+    if request.method == 'POST': # Üblicherweise eine POST-Anfrage für Aktionen
+        # HIER kommt Ihre Logik zum Anfordern des Neustarts hin.
+        # Dies ist nur ein Platzhalter.
+        logger.info("API-Anfrage zum Neustart des Listeners empfangen.")
+        # Beispiel: Setzen eines Flags oder Senden einer Nachricht an den Listener-Prozess.
+        # Die tatsächliche Implementierung hängt stark von Ihrer Architektur ab,
+        # wie Sie mit dem Management-Befehl 'listen_device.py' kommunizieren können.
+
+        # Dummy-Antwort
+        return JsonResponse({'status': 'success', 'message': 'Anfrage zum Neustart des Listeners wurde empfangen (Implementierung ausstehend).'})
+    return JsonResponse({'status': 'error', 'message': 'Nur POST-Anfragen erlaubt.'}, status=405)

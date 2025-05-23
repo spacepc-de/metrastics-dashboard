@@ -8,9 +8,14 @@
         <div class="col-md-8"> <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-broadcast-pin"></i> Listener & Local Node Status</span>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="fetchConnectionStatus()">
-                        <i class="bi bi-arrow-clockwise"></i> Refresh Status
-                    </button>
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary me-2" onclick="fetchConnectionStatus()">
+                            <i class="bi bi-arrow-clockwise"></i> Status Aktualisieren
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning" id="restartListenerBtn" onclick="requestListenerRestart()">
+                            <i class="bi bi-power"></i> Listener Neustarten
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body" id="connectionStatusCardBody">
                     <p><strong>Listener Status:</strong> <span id="listenerStatus"><span class="status-indicator status-initializing"></span> Initializing...</span></p>
@@ -118,9 +123,9 @@
     // formatTimeAgo and getNodeName are in base.html and available globally
 
     function fetchCounters() {
-        $.getJSON("{% url 'api_counters' %}", function(data) {
+        $.getJSON("{% url 'metrastics_dashboard:api_counters' %}", function(data) { // Korrektur: Namespace
             const countersRow = $('#countersRow');
-            countersRow.empty(); // Clear previous counters or loading spinner
+            countersRow.empty();
 
             const counterItems = [
                 { label: 'Total Packets', value: data.total_packets, icon: 'bi-collection-fill', color: 'primary' },
@@ -129,7 +134,7 @@
                 { label: 'Positions', value: data.position_packets, icon: 'bi-geo-alt-fill', color: 'warning' },
                 { label: 'Telemetry', value: data.telemetry_packets, icon: 'bi-speedometer', color: 'danger' },
                 { label: 'User Info', value: data.userinfo_packets, icon: 'bi-person-badge-fill', color: 'secondary' },
-                { label: 'Traceroutes', value: data.traceroute_packets, icon: 'bi-signpost-split-fill', color: 'dark' } // Changed from Other
+                { label: 'Traceroutes', value: data.traceroute_packets, icon: 'bi-signpost-split-fill', color: 'dark' }
             ];
 
             counterItems.forEach(item => {
@@ -150,9 +155,9 @@
     }
 
     function fetchNodeList() {
-        $.getJSON("{% url 'api_nodes' %}", function(data) {
+        $.getJSON("{% url 'metrastics_dashboard:api_nodes' %}", function(data) { // Korrektur: Namespace
             const nodeListTableBody = $('#nodeListTableBody');
-            nodeListTableBody.empty(); // Clear previous data or loading spinner
+            nodeListTableBody.empty();
             if (data.length === 0) {
                 nodeListTableBody.html('<tr><td colspan="8" class="text-center">No nodes found.</td></tr>');
                 return;
@@ -176,9 +181,9 @@
     }
 
     function fetchLivePackets() {
-        $.getJSON("{% url 'api_live_packets' %}", function(data) {
+        $.getJSON("{% url 'metrastics_dashboard:api_live_packets' %}", function(data) { // Korrektur: Namespace
             const livePacketFeed = $('#livePacketFeed');
-            livePacketFeed.empty(); // Clear previous data or loading spinner
+            livePacketFeed.empty();
             if (data.length === 0) {
                 livePacketFeed.html('<div class="text-center">No recent packets.</div>');
                 return;
@@ -197,7 +202,7 @@
 
 
                 let packetDetail = '';
-                if (packet.packet_type === 'Message' && packet.decoded_json && typeof packet.decoded_json.payload === 'string') { // Ensure payload is string
+                if (packet.packet_type === 'Message' && packet.decoded_json && typeof packet.decoded_json.payload === 'string') {
                     packetDetail = packet.decoded_json.payload;
                      if (packetDetail.length > 50) packetDetail = packetDetail.substring(0, 50) + "...";
                 } else if (packet.packet_type === 'Position' && packet.decoded_json && packet.decoded_json.position) {
@@ -216,7 +221,7 @@
                     'Telemetry': 'bg-info text-dark',
                     'User Info': 'bg-secondary',
                     'Routing': 'bg-primary',
-                    'Traceroute': 'bg-primary', // Can use same as routing or a new one
+                    'Traceroute': 'bg-primary',
                     'Encrypted': 'bg-dark',
                     'Unknown': 'bg-light text-dark',
                     'Other': 'bg-light text-dark'
@@ -249,7 +254,8 @@
     }
 
     function fetchConnectionStatus() {
-        $.getJSON("{% url 'api_connection_status' %}", function(data) {
+        const restartBtn = $('#restartListenerBtn');
+        $.getJSON("{% url 'metrastics_dashboard:api_connection_status' %}", function(data) { // Korrektur: Namespace
             const listenerStatus = $('#listenerStatus');
             const localNodeInfoDiv = $('#localNodeInfo');
             const listenerErrorDiv = $('#listenerError');
@@ -273,7 +279,6 @@
                 $('#localNodeName').text(escapeHtml(data.local_node_info.name || 'N/A'));
                 $('#localNodeId').text(escapeHtml(data.local_node_info.node_id));
                 let channelsText = 'N/A';
-                // Ensure channel_map is treated as an object, not a string, before processing
                 let channelMapData = data.local_node_info.channel_map;
                 if (typeof channelMapData === 'string') {
                     try {
@@ -294,15 +299,26 @@
             } else {
                 localNodeInfoDiv.hide();
             }
+
+            if (data.raw_status === 'INITIALIZING' || data.raw_status === 'CONNECTING' || data.restart_requested) {
+                restartBtn.prop('disabled', true).addClass('disabled');
+                if(data.restart_requested) {
+                    listenerStatus.append(' (Neustart angefordert...)');
+                }
+            } else {
+                restartBtn.prop('disabled', false).removeClass('disabled');
+            }
+
         }).fail(function() {
             $('#listenerStatus').html('<span class="status-indicator status-error"></span> Error fetching status');
             $('#listenerError').text('Could not connect to the status API.').show();
             $('#localNodeInfo').hide();
+            restartBtn.prop('disabled', true).addClass('disabled');
         });
     }
 
     function fetchAverageSignalStats() {
-        $.getJSON("{% url 'api_average_signal_stats' %}", function(data) {
+        $.getJSON("{% url 'metrastics_dashboard:api_average_signal_stats' %}", function(data) { // Korrektur: Namespace
             const avgSnrSpan = $('#avgSnr');
             const avgRssiSpan = $('#avgRssi');
             const packetCountSpan = $('#avgSignalPacketCount');
@@ -328,7 +344,6 @@
         });
     }
 
-    // --- Dashboard Map Functions ---
     let dashboardMapInstance = null;
     let dashboardNodeMarkersLayer = null;
 
@@ -336,15 +351,14 @@
         if ($('#dashboardNodeMap').length === 0) return;
         if (dashboardMapInstance) {
             if(dashboardNodeMarkersLayer) dashboardNodeMarkersLayer.clearLayers();
-            fetchNodesForDashboardMap(); // Fetch data if map already exists
+            fetchNodesForDashboardMap();
             return;
         }
 
-        // Show spinner before map initialization
         $('#dashboardNodeMap .spinner-border').show();
 
         try {
-            dashboardMapInstance = L.map('dashboardNodeMap').setView([20, 0], 2); // Default global view
+            dashboardMapInstance = L.map('dashboardNodeMap').setView([20, 0], 2);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -352,7 +366,7 @@
             }).addTo(dashboardMapInstance);
 
             dashboardNodeMarkersLayer = L.layerGroup().addTo(dashboardMapInstance);
-            fetchNodesForDashboardMap(); // Initial data fetch
+            fetchNodesForDashboardMap();
         } catch (e) {
             console.error("Error initializing dashboard map:", e);
              $('#dashboardNodeMap').html('<div class="alert alert-danger m-2 p-2">Map initialization failed. Is Leaflet loaded?</div>');
@@ -362,16 +376,13 @@
     function fetchNodesForDashboardMap() {
         if (!dashboardMapInstance || !dashboardNodeMarkersLayer) {
             if ($('#dashboardNodeMap').length && !dashboardMapInstance) {
-                // console.log("Map not ready, attempting to initialize first in fetchNodesForDashboardMap");
-                initializeDashboardMap(); // This will call fetchNodesForDashboardMap again after init
-            } else {
-                // console.warn("Dashboard map or marker layer not initialized. Cannot fetch nodes.");
+                initializeDashboardMap();
             }
             return;
         }
-        $('#dashboardNodeMap .spinner-border').show(); // Show spinner on refresh
+        $('#dashboardNodeMap .spinner-border').show();
 
-        $.getJSON("{% url 'api_get_all_nodes' %}", function(nodes) {
+        $.getJSON("{% url 'metrastics_dashboard:api_get_all_nodes' %}", function(nodes) { // Korrektur: Namespace
             dashboardNodeMarkersLayer.clearLayers();
             let nodesWithLocation = [];
 
@@ -398,18 +409,60 @@
             if (nodesWithLocation.length > 0) {
                 dashboardMapInstance.fitBounds(nodesWithLocation, { padding: [40, 40], maxZoom: 14, animate: false });
             } else {
-                dashboardMapInstance.setView([20,0], 2); // Reset to global view if no nodes
+                dashboardMapInstance.setView([20,0], 2);
             }
-             $('#dashboardNodeMap .spinner-border').hide(); // Hide spinner after loading
-             // console.log("Dashboard map updated.");
-             // Invalidate map size in case it was hidden or resized
+             $('#dashboardNodeMap .spinner-border').hide();
              setTimeout(() => { if(dashboardMapInstance) dashboardMapInstance.invalidateSize() }, 100);
         }).fail(function() {
             console.error("Error loading nodes for the dashboard map.");
             $('#dashboardNodeMap').html('<div class="alert alert-danger m-2 p-2">Error loading map data. Try refreshing.</div>');
         });
     }
-    // --- End Dashboard Map Functions ---
+
+    function requestListenerRestart() {
+        if (!confirm('Sind Sie sicher, dass Sie den Listener neu starten möchten? Dies kann die Verbindung kurzzeitig unterbrechen.')) {
+            return;
+        }
+        const restartBtn = $('#restartListenerBtn');
+        restartBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Neustart...');
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        const csrftoken = getCookie('csrftoken');
+
+        $.ajax({
+            url: "{% url 'metrastics_dashboard:api_request_listener_restart' %}", // Korrektur: Namespace
+            type: "POST",
+            headers: { "X-CSRFToken": csrftoken },
+            dataType: "json",
+            success: function(response) {
+                alert(response.message);
+                fetchConnectionStatus();
+            },
+            error: function(xhr, status, error) {
+                let errorMsg = "Fehler beim Anfordern des Listener-Neustarts.";
+                if(xhr.responseJSON && xhr.responseJSON.message) {
+                    errorMsg = xhr.responseJSON.message;
+                }
+                alert(errorMsg);
+                 fetchConnectionStatus();
+            },
+            complete: function() {
+            }
+        });
+    }
 
 
     $(document).ready(function() {
@@ -418,14 +471,14 @@
         fetchNodeList();
         fetchLivePackets();
         fetchAverageSignalStats();
-        initializeDashboardMap(); // Initialize the new dashboard map
+        initializeDashboardMap();
 
-        setInterval(fetchConnectionStatus, 10000); // Refresh status every 10 seconds
-        setInterval(fetchCounters, 30000);      // Refresh counters every 30 seconds
-        setInterval(fetchNodeList, 30000);      // Refresh node list every 30 seconds
-        setInterval(fetchLivePackets, 5000);    // Refresh packet feed every 5 seconds
-        setInterval(fetchAverageSignalStats, 60000 * 5); // Refresh average signals every 5 minutes
-        setInterval(fetchNodesForDashboardMap, 60000 * 2); // Refresh dashboard map every 2 minutes
+        setInterval(fetchConnectionStatus, 3000);
+        setInterval(fetchCounters, 30000);
+        setInterval(fetchNodeList, 30000);
+        setInterval(fetchLivePackets, 5000);
+        setInterval(fetchAverageSignalStats, 60000 * 5);
+        setInterval(fetchNodesForDashboardMap, 60000 * 2);
     });
 </script>
 {% endblock %}

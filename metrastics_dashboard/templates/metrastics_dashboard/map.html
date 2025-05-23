@@ -49,7 +49,7 @@
 
     function fetchAllNodesForMap() {
         $('#mapLastUpdated').text('Fetching data...');
-        $.getJSON("{% url 'api_get_all_nodes' %}", function(nodes) {
+        $.getJSON("{% url 'metrastics_dashboard:api_get_all_nodes' %}", function(nodes) {
             nodeMarkersLayer.clearLayers(); // Clear existing markers before adding new ones
             let nodesWithLocation = [];
 

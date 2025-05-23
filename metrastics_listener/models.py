@@ -293,7 +293,6 @@ class ListenerState(models.Model):
         ('ERROR', 'Error'),
         ('UNKNOWN', 'Unknown'), # Default fallback
     ]
-    # Use a fixed primary key to ensure only one row for the listener state (singleton pattern)
     singleton_id = models.PositiveIntegerField(primary_key=True, default=1, editable=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNKNOWN')
     last_error_message = models.TextField(null=True, blank=True)
@@ -301,6 +300,7 @@ class ListenerState(models.Model):
     local_node_num = models.PositiveIntegerField(null=True, blank=True)
     local_node_name = models.CharField(max_length=100, null=True, blank=True)
     local_node_channel_map_json = models.JSONField(null=True, blank=True, help_text="JSON representation of the channel map")
+    restart_requested = models.BooleanField(default=False, help_text="Set to true to request a listener restart.") # Neuer Eintrag
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -308,4 +308,4 @@ class ListenerState(models.Model):
 
     class Meta:
         verbose_name = "Listener State"
-        verbose_name_plural = "Listener States" # Or just "Listener State" if only one row
+        verbose_name_plural = "Listener States"

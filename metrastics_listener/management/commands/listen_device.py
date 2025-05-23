@@ -11,8 +11,8 @@ from datetime import datetime, timezone as dt_timezone
 import threading
 
 from django.core.management.base import BaseCommand
-from django.conf import settings # Import settings directly
-from django.db import transaction, close_old_connections
+from django.conf import settings
+from django.db import transaction, close_old_connections, OperationalError
 from django.utils import timezone as django_timezone
 
 import meshtastic
@@ -20,7 +20,7 @@ import meshtastic.tcp_interface
 from pubsub import pub
 from flask import Flask, request as flask_request, jsonify
 import requests
-import openai # Ensure openai is imported
+import openai
 
 from metrastics_listener.models import Node, Packet, Message, Position, Telemetry, ListenerState, Traceroute
 from metrastics_commander.models import CommanderRule
@@ -99,16 +99,16 @@ def classify_packet_type(packet_dict: dict) -> Tuple[str, Any]:
         return "Message", str(payload) if payload is not None else ""
     elif portnum_str == 'POSITION_APP' and 'position' in decoded:
         return "Position", decoded['position']
-    elif portnum_str == 'NODEINFO_APP' and 'user' in decoded:  # Often contains user details
+    elif portnum_str == 'NODEINFO_APP' and 'user' in decoded:
         return "User Info", decoded['user']
     elif portnum_str == 'TELEMETRY_APP' and 'telemetry' in decoded:
         return "Telemetry", decoded['telemetry']
     elif portnum_str == 'ROUTING_APP':
-        return "Routing", decoded.get('routing')  # For traceroutes etc.
+        return "Routing", decoded.get('routing')
 
     if 'position' in decoded: return "Position", decoded['position']
     if 'telemetry' in decoded: return "Telemetry", decoded['telemetry']
-    if 'user' in decoded: return "User Info", decoded['user']  # Fallback for user info
+    if 'user' in decoded: return "User Info", decoded['user']
 
     payload = decoded.get('payload')
     if payload is not None:
@@ -220,18 +220,18 @@ def call_chatgpt_api(user_query: str) -> Optional[str]:
     if not api_key or api_key == "your_openai_api_key_here":
         commander_logger.error("OpenAI API key is not configured or is placeholder in settings.py.")
         return "OpenAI API key not configured."
-    if not api_key.startswith("sk-"): # Basic check
+    if not api_key.startswith("sk-"):
         commander_logger.warning(f"OpenAI API key in settings.py does not look like a valid key: {api_key[:10]}...")
 
     try:
         client = openai.OpenAI(api_key=api_key)
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo", # Consider making this configurable
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
-            max_tokens=150 # Consider making this configurable
+            max_tokens=150
         )
         response_text = completion.choices[0].message.content
         commander_logger.info(f"ChatGPT API response: {response_text}")
@@ -269,7 +269,7 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
                 f"ChatGPT command '{chatgpt_trigger}' triggered by {sender_node_id} with query: '{user_query}'")
             chatgpt_response = call_chatgpt_api(user_query)
             if chatgpt_response:
-                max_len = 220 # Max length for Meshtastic text messages
+                max_len = 220
                 if len(chatgpt_response) > max_len:
                     chatgpt_response = chatgpt_response[:max_len - 3] + "..."
                     commander_logger.warning(f"ChatGPT response for {sender_node_id} was truncated.")
@@ -306,11 +306,11 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
             try:
                 requests.post(flask_send_url, json=send_payload, timeout=10)
             except Exception:
-                pass # Best effort to inform user
-        return # ChatGPT command processed, skip other rules
+                pass
+        return
 
     try:
-        with transaction.atomic(): # Ensure rule processing is atomic for cooldown updates
+        with transaction.atomic():
             rules_list = list(CommanderRule.objects.filter(enabled=True))
 
             for rule in rules_list:
@@ -391,7 +391,7 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
                 for placeholder, value in replacements.items():
                     response_text = response_text.replace(placeholder, value)
 
-                max_len = 220 # Max length for Meshtastic text messages
+                max_len = 220
                 if len(response_text) > max_len:
                     response_text = response_text[:max_len - 3] + "..."
                     commander_logger.warning(f"Response for rule '{rule.name}' was truncated.")
@@ -399,19 +399,18 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
                 send_payload = {
                     "text": response_text,
                     "destinationId": sender_node_id,
-                    "wantAck": True, # Default to wanting an ACK for rule responses
+                    "wantAck": True,
                     "channelIndex": original_channel_index
                 }
                 try:
                     commander_logger.info(f"Commander: Sending POST to {flask_send_url} with payload: {send_payload}")
                     response_http = requests.post(flask_send_url, json=send_payload,
-                                                  timeout=10) # Standard timeout
-                    response_http.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                                                  timeout=10)
+                    response_http.raise_for_status()
 
                     commander_logger.info(
                         f"Commander: Reply for rule '{rule.name}' to {sender_node_id} requested via HTTP. Response: {response_http.json()}")
 
-                    # Update cooldown timestamp only if HTTP request was successful
                     if response_http.json().get("status") == "success":
                         if rule.cooldown_seconds > 0:
                             if not isinstance(rule.last_triggered_for_nodes, dict):
@@ -426,10 +425,10 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
 
                 except requests.exceptions.RequestException as http_e:
                     commander_logger.error(f"Commander: HTTP Error sending reply for rule '{rule.name}': {http_e}")
-                except Exception as e: # Catch other errors like JSON parsing if response is not JSON
+                except Exception as e:
                     commander_logger.exception(
                         f"Commander: Error processing send request or saving rule '{rule.name}': {e}")
-                break # Important: stop processing further rules for this message
+                break
     except Exception as e:
         commander_logger.exception(f"Database or other critical error in process_commander_rules: {e}")
 
@@ -437,16 +436,14 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
 def on_receive_django(packet, interface):
     logger.debug(f"on_receive_django: Packet received: {packet}")
     try:
-        close_old_connections() # Ensure DB connections are fresh
+        close_old_connections()
         packet_data_dict = ensure_serializable(packet)
 
         current_time_epoch = time.time()
-        # Prefer rxTime from packet if available, otherwise use current time
         packet_data_dict['timestamp'] = packet_data_dict.get('rxTime', current_time_epoch)
 
-        # Generate a unique event_id if not present or invalid
         packet_id_val = packet_data_dict.get('id', packet_data_dict.get('decoded', {}).get('id', 'no_id'))
-        if isinstance(packet_id_val, bytes): # Ensure it's a string
+        if isinstance(packet_id_val, bytes):
             packet_id_val = packet_id_val.hex()
 
         if 'event_id' not in packet_data_dict or not packet_data_dict['event_id']:
@@ -460,30 +457,26 @@ def on_receive_django(packet, interface):
         if to_num is not None:
             to_id_str = "^all" if to_num == 0xFFFFFFFF else get_node_id_str(to_num)
 
-        # Add string IDs to the packet dict for easier access later
         packet_data_dict['fromId'] = from_id_str
         packet_data_dict['toId'] = to_id_str
 
-        # Map internal channel ID (bytes) to user-facing channel index (int)
         original_internal_channel_id = packet_data_dict.get('channel')
         if isinstance(original_internal_channel_id, bytes):
-            original_internal_channel_id = original_internal_channel_id.hex() # Convert bytes to hex string
+            original_internal_channel_id = original_internal_channel_id.hex()
 
         mapped_channel_index = map_internal_channel_to_user_index(
             original_internal_channel_id) if original_internal_channel_id is not None else 0
 
-
         app_packet_type, payload_specific_data = classify_packet_type(packet_data_dict)
         flask_send_url = f"http://localhost:{Command.FLASK_PORT}/send_meshtastic_message"
-
 
         db_packet_data = {
             'event_id': packet_data_dict['event_id'],
             'timestamp': packet_data_dict['timestamp'],
-            'rx_time': packet_data_dict.get('rxTime'), # Original rxTime from packet if available
+            'rx_time': packet_data_dict.get('rxTime'),
             'from_node_id_str': from_id_str,
             'to_node_id_str': to_id_str,
-            'channel': mapped_channel_index, # Store the user-mapped channel index
+            'channel': mapped_channel_index,
             'portnum': getattr(packet_data_dict.get('decoded', {}).get('portnum'), 'name',
                                str(packet_data_dict.get('decoded', {}).get('portnum'))),
             'packet_type': app_packet_type,
@@ -492,7 +485,7 @@ def on_receive_django(packet, interface):
             'hop_limit': packet_data_dict.get('hopLimit'),
             'want_ack': packet_data_dict.get('wantAck', False),
             'decoded_json': packet_data_dict.get('decoded'),
-            'raw_json': packet_data_dict, # Store the full original (but serialized) packet
+            'raw_json': packet_data_dict,
         }
 
         from_node_obj = None
@@ -505,16 +498,16 @@ def on_receive_django(packet, interface):
                     defaults={
                         'node_num': from_num,
                         'last_heard': db_packet_data['timestamp'],
-                        'snr': db_packet_data.get('rx_snr'), # Update SNR/RSSI with each packet
+                        'snr': db_packet_data.get('rx_snr'),
                         'rssi': db_packet_data.get('rx_rssi'),
                     }
                 )
                 db_packet_data['from_node'] = from_node_obj
 
-            if to_id_str and to_id_str != "^all": # Only create/get if not broadcast
+            if to_id_str and to_id_str != "^all":
                 to_node_obj, _ = Node.objects.get_or_create(
                     node_id=to_id_str,
-                    defaults={'node_num': get_node_num_from_id_str(to_id_str)} # Default num if new
+                    defaults={'node_num': get_node_num_from_id_str(to_id_str)}
                 )
                 db_packet_data['to_node'] = to_node_obj
 
@@ -522,43 +515,40 @@ def on_receive_django(packet, interface):
             logger.info(
                 f"Packet {packet_obj.event_id} ({app_packet_type}) from {from_id_str or 'N/A'} to {to_id_str or 'N/A'} saved.")
 
-            message_obj_for_commander = None # Initialize
+            message_obj_for_commander = None
 
             if app_packet_type == "Message" and payload_specific_data and from_node_obj:
                 message_obj_for_commander = Message.objects.create(
                     packet=packet_obj,
                     from_node=from_node_obj,
                     from_node_id_str=from_id_str,
-                    to_node=to_node_obj, # Can be None for broadcast
+                    to_node=to_node_obj,
                     to_node_id_str=to_id_str,
-                    channel=original_internal_channel_id, # Store original channel ID for reference if needed
+                    channel=original_internal_channel_id,
                     text=str(payload_specific_data),
                     timestamp=packet_obj.timestamp,
                     rx_snr=packet_obj.rx_snr,
                     rx_rssi=packet_obj.rx_rssi
                 )
-                # Call commander rules processing if a message was successfully created
                 if message_obj_for_commander:
                     process_commander_rules(message_obj_for_commander, from_node_obj, flask_send_url,
                                             mapped_channel_index)
 
 
             elif app_packet_type == "Position" and payload_specific_data and from_node_obj:
-                pos_data = payload_specific_data # This is already a dict from classify_packet_type
+                pos_data = payload_specific_data
                 lat = pos_data.get('latitudeI', 0) / 1e7 if pos_data.get('latitudeI') is not None else pos_data.get(
                     'latitude')
                 lon = pos_data.get('longitudeI', 0) / 1e7 if pos_data.get('longitudeI') is not None else pos_data.get(
                     'longitude')
                 altitude = pos_data.get('altitude')
-                precision_bits = pos_data.get('precisionBits', pos_data.get('gpsPrecision')) # Older vs newer field name
+                precision_bits = pos_data.get('precisionBits', pos_data.get('gpsPrecision'))
                 ground_speed = pos_data.get('groundSpeed')
                 ground_track = pos_data.get('groundTrack')
                 sats_in_view = pos_data.get('satsInView')
-                # Use 'time' from position payload if available, otherwise packet timestamp
                 position_packet_time = pos_data.get('time', packet_obj.timestamp)
 
-
-                if lat is not None and lon is not None: # Ensure essential fields are present
+                if lat is not None and lon is not None:
                     Position.objects.create(
                         node=from_node_obj,
                         timestamp=position_packet_time,
@@ -569,30 +559,26 @@ def on_receive_django(packet, interface):
                         ground_speed=ground_speed,
                         ground_track=ground_track,
                         sats_in_view=sats_in_view,
-                        # Add new fields like PDOP, HDOP, VDOP if available in pos_data
                         pdop=pos_data.get('pdop'),
                         hdop=pos_data.get('hdop'),
                         vdop=pos_data.get('vdop'),
                     )
-                    # Update Node model with latest position
                     from_node_obj.latitude = lat
                     from_node_obj.longitude = lon
                     from_node_obj.altitude = altitude
                     from_node_obj.position_time = position_packet_time
-                    from_node_obj.position_info = pos_data # Store raw position dict
+                    from_node_obj.position_info = pos_data
                     from_node_obj.save(
                         update_fields=['latitude', 'longitude', 'altitude', 'position_time', 'position_info',
                                        'updated_at'])
 
             elif app_packet_type == "Telemetry" and payload_specific_data and from_node_obj:
-                metrics_data = payload_specific_data # This is already a dict
+                metrics_data = payload_specific_data
                 dev_metrics = metrics_data.get('deviceMetrics', {})
                 env_metrics = metrics_data.get('environmentMetrics', {})
-                power_metrics = metrics_data.get('powerMetrics', {}) # Check if present
+                power_metrics = metrics_data.get('powerMetrics', {})
 
-                # Use 'time' from deviceMetrics if available, else from powerMetrics, else packet timestamp
                 telemetry_packet_time = dev_metrics.get('time', power_metrics.get('time', packet_obj.timestamp))
-
 
                 Telemetry.objects.create(
                     node=from_node_obj,
@@ -606,10 +592,9 @@ def on_receive_django(packet, interface):
                     relative_humidity=env_metrics.get('relativeHumidity'),
                     barometric_pressure=env_metrics.get('barometricPressure'),
                     gas_resistance=env_metrics.get('gasResistance'),
-                    iaq=env_metrics.get('iaq') # Index for Air Quality
+                    iaq=env_metrics.get('iaq')
                 )
 
-                # Update Node model with latest telemetry
                 current_battery = dev_metrics.get('batteryLevel', power_metrics.get('batteryLevel'))
                 current_voltage = dev_metrics.get('voltage', power_metrics.get('voltage'))
                 current_uptime = dev_metrics.get('uptimeSeconds')
@@ -617,62 +602,53 @@ def on_receive_django(packet, interface):
                 if current_battery is not None: from_node_obj.battery_level = current_battery
                 if current_voltage is not None: from_node_obj.voltage = current_voltage
                 if current_uptime is not None: from_node_obj.uptime_seconds = current_uptime
-                # Also update channel utilization and air util tx on the node
                 if dev_metrics.get('channelUtilization') is not None:
-                     from_node_obj.channel_utilization = dev_metrics.get('channelUtilization')
+                    from_node_obj.channel_utilization = dev_metrics.get('channelUtilization')
                 if dev_metrics.get('airUtilTx') is not None:
-                     from_node_obj.air_util_tx = dev_metrics.get('airUtilTx')
-
+                    from_node_obj.air_util_tx = dev_metrics.get('airUtilTx')
 
                 from_node_obj.telemetry_time = telemetry_packet_time
-                from_node_obj.device_metrics_info = dev_metrics # Store raw device metrics
-                from_node_obj.environment_metrics_info = env_metrics # Store raw env metrics
-                # If power_metrics exist and are different, merge them into device_metrics_info for storage
+                from_node_obj.device_metrics_info = dev_metrics
+                from_node_obj.environment_metrics_info = env_metrics
                 if power_metrics:
                     if not from_node_obj.device_metrics_info: from_node_obj.device_metrics_info = {}
-                    from_node_obj.device_metrics_info['powerMetrics'] = power_metrics # Add/update power metrics
+                    from_node_obj.device_metrics_info['powerMetrics'] = power_metrics
 
                 from_node_obj.save(update_fields=['battery_level', 'voltage', 'uptime_seconds', 'telemetry_time',
-                                                  'channel_utilization', 'air_util_tx', # Added
+                                                  'channel_utilization', 'air_util_tx',
                                                   'device_metrics_info', 'environment_metrics_info', 'updated_at'])
 
 
             elif app_packet_type == "User Info" and payload_specific_data and from_node_obj:
-                user_data = payload_specific_data # This is already a dict
+                user_data = payload_specific_data
                 from_node_obj.long_name = user_data.get('longName')
                 from_node_obj.short_name = user_data.get('shortName')
                 mac_addr_raw = user_data.get('macaddr')
-                if isinstance(mac_addr_raw, bytes): # Convert bytes to hex string for MAC
+                if isinstance(mac_addr_raw, bytes):
                     from_node_obj.macaddr = mac_addr_raw.hex(':')
-                elif isinstance(mac_addr_raw, str): # Already a string
+                elif isinstance(mac_addr_raw, str):
                     from_node_obj.macaddr = mac_addr_raw
 
-                hw_model_val = user_data.get('hwModel') # This could be an enum or string
+                hw_model_val = user_data.get('hwModel')
                 if isinstance(hw_model_val, str) and hw_model_val != "UNSET":
                     from_node_obj.hw_model = hw_model_val
-                elif hasattr(hw_model_val, 'name') and hw_model_val.name != "UNSET": # If it's an enum object
+                elif hasattr(hw_model_val, 'name') and hw_model_val.name != "UNSET":
                     from_node_obj.hw_model = hw_model_val.name
 
-
-                role_val = user_data.get('role') # This could be an enum
+                role_val = user_data.get('role')
                 from_node_obj.role = getattr(role_val, 'name', str(role_val)) if role_val is not None else None
-                from_node_obj.user_info = user_data # Store raw user info dict
+                from_node_obj.user_info = user_data
                 from_node_obj.save(
                     update_fields=['long_name', 'short_name', 'macaddr', 'hw_model', 'role', 'user_info', 'updated_at'])
 
             elif app_packet_type == "Routing" and payload_specific_data and to_node_obj and from_node_obj:
-                # Traceroute packets are often sent TO the target, and the REPLY comes FROM the target.
-                # 'from_node_obj' is the one sending the reply (responder_node)
-                # 'to_node_obj' is the one that initiated (requester_node)
                 if not isinstance(payload_specific_data, dict):
                     logger.debug(
                         f"Routing packet payload_specific_data is not a dictionary. From: {from_id_str}, To: {to_id_str}. Data: {payload_specific_data}")
                 else:
-                    # Attempt to find the route list, which might be nested
-                    error_source_dict = payload_specific_data # Default if not nested
-                    route_list_source_dict = payload_specific_data # Default
+                    error_source_dict = payload_specific_data
+                    route_list_source_dict = payload_specific_data
 
-                    # Check for common nesting patterns from different Meshtastic versions/contexts
                     if 'routeDiscovery' in payload_specific_data and isinstance(payload_specific_data['routeDiscovery'],
                                                                                 dict):
                         error_source_dict = payload_specific_data['routeDiscovery']
@@ -683,84 +659,69 @@ def on_receive_django(packet, interface):
                             route_list_source_dict = raw_data['route_reply']
                         elif 'route_request' in raw_data and isinstance(raw_data['route_request'], dict):
                             route_list_source_dict = raw_data['route_request']
-                        # other potential keys if library structure changes
-
 
                     route_path = None
                     if 'route' in route_list_source_dict:
                         route_path_value = route_list_source_dict['route']
-                        if isinstance(route_path_value, str): # Sometimes it's a JSON string
+                        if isinstance(route_path_value, str):
                             try:
                                 parsed_route = json.loads(route_path_value)
                                 if isinstance(parsed_route, list):
                                     route_path = parsed_route
                                 else:
-                                    logger.warning(f"Parsed route from string is not a list: '{parsed_route}' for packet {packet_obj.event_id}")
+                                    logger.warning(
+                                        f"Parsed route from string is not a list: '{parsed_route}' for packet {packet_obj.event_id}")
                             except json.JSONDecodeError:
-                                logger.warning(f"Could not parse route string as JSON: '{route_path_value}' for packet {packet_obj.event_id}")
-                        elif isinstance(route_path_value, list): # Directly a list
+                                logger.warning(
+                                    f"Could not parse route string as JSON: '{route_path_value}' for packet {packet_obj.event_id}")
+                        elif isinstance(route_path_value, list):
                             route_path = route_path_value
                         else:
-                            logger.warning(f"Unexpected type for 'route' value: {type(route_path_value)} for packet {packet_obj.event_id}")
+                            logger.warning(
+                                f"Unexpected type for 'route' value: {type(route_path_value)} for packet {packet_obj.event_id}")
 
-
-                    # Check for errorReason or error_reason (case and underscore variations)
                     actual_error_reason_str = None
-                    if 'errorReason' in error_source_dict: # CamelCase from some protobufs
+                    if 'errorReason' in error_source_dict:
                         error_val = error_source_dict['errorReason']
                         actual_error_reason_str = getattr(error_val, 'name', str(error_val)).upper()
-                    elif 'error_reason' in error_source_dict: # snake_case from some dicts
+                    elif 'error_reason' in error_source_dict:
                         error_val = error_source_dict['error_reason']
-                        # Handle if it's an int (0 usually means NO_ERROR) or an enum-like object
                         if isinstance(error_val, int) and error_val == 0:
-                            actual_error_reason_str = "NONE" # Or "NO_ERROR" to match enum
+                            actual_error_reason_str = "NONE"
                         else:
                             actual_error_reason_str = getattr(error_val, 'name', str(error_val)).upper()
 
-
                     is_significant_error = actual_error_reason_str is not None and \
                                            actual_error_reason_str not in ["NONE", "NO_ERROR"]
-
 
                     if route_path is not None and isinstance(route_path, list) and not is_significant_error:
                         logger.info(
                             f"Traceroute processed. Requester: {to_id_str}, Responder: {from_id_str}. Path: {route_path}. Reported error status: {actual_error_reason_str or 'Not present'}")
                         Traceroute.objects.create(
-                            packet=packet_obj, # Link to the original packet
-                            packet_event_id=packet_obj.event_id, # Store event_id directly for easier lookup
-                            requester_node=to_node_obj, # The node that asked for the traceroute
+                            packet=packet_obj,
+                            packet_event_id=packet_obj.event_id,
+                            requester_node=to_node_obj,
                             requester_node_id_str=to_id_str,
-                            responder_node=from_node_obj, # The node that is responding with the route
+                            responder_node=from_node_obj,
                             responder_node_id_str=from_id_str,
-                            route_json=route_path, # The actual route as a list of node numbers
+                            route_json=route_path,
                             timestamp=packet_obj.timestamp
                         )
                     elif is_significant_error:
-                        logger.info(f"Significant routing error reported. Requester: {to_id_str}, Responder: {from_id_str}. Error: {actual_error_reason_str}. Full routing data: {payload_specific_data}")
-                        # Optionally, still save the Traceroute with an error field if needed
-                        # Traceroute.objects.create(
-                        #     packet=packet_obj,
-                        #     packet_event_id=packet_obj.event_id,
-                        #     requester_node=to_node_obj,
-                        #     requester_node_id_str=to_id_str,
-                        #     responder_node=from_node_obj,
-                        #     responder_node_id_str=from_id_str,
-                        #     route_json={'error': actual_error_reason_str, 'details': payload_specific_data}, # Store error in route_json
-                        #     timestamp=packet_obj.timestamp
-                        # )
+                        logger.info(
+                            f"Significant routing error reported. Requester: {to_id_str}, Responder: {from_id_str}. Error: {actual_error_reason_str}. Full routing data: {payload_specific_data}")
                     else:
-                        # This case means no valid route_path list was found, and no significant error was reported.
-                        # This might happen with initial route request packets, or other routing control messages.
-                        logger.debug(f"Routing packet from {from_id_str} to {to_id_str} did not yield a usable route list and no significant error. payload_specific_data: {payload_specific_data}")
+                        logger.debug(
+                            f"Routing packet from {from_id_str} to {to_id_str} did not yield a usable route list and no significant error. payload_specific_data: {payload_specific_data}")
 
 
     except Exception as e:
         logger.exception(f"Error in on_receive_django: {e}")
 
 
-def on_node_updated_django(node, interface): # node is a dict from the Meshtastic library
+def on_node_updated_django(node, interface):
     logger.debug(f"on_node_updated_django: Node data received: {node} (Type: {type(node)})")
-    if not isinstance(node, dict) and not hasattr(node, '__dict__'): # Check if it's dict-like
+    if not isinstance(node, dict) and not hasattr(node, '__dict__'):
         logger.warning(
             f"on_node_updated_django: Unexpected type for node: {type(node)} with value: {repr(node)}. Expecting dict or object with attributes. Ignoring event."
         )
@@ -768,91 +729,83 @@ def on_node_updated_django(node, interface): # node is a dict from the Meshtasti
 
     try:
         close_old_connections()
-        # 'node' from pubsub is usually already a dict-like object (often AttrDict from the library)
-        # ensure_serializable is still good for deeply nested structures or bytes.
         node_data_dict = ensure_serializable(node)
 
-        if not isinstance(node_data_dict, dict): # Should still be a dict after serialization
+        if not isinstance(node_data_dict, dict):
             logger.warning(
                 f"on_node_updated_django: After serialization, node_data_dict is not a dict! Type: {type(node_data_dict)} with value: {repr(node_data_dict)}. Ignoring event."
             )
             return
 
-        # Determine node_num and node_id_str
-        node_num = node_data_dict.get('num') # Usually the primary key for nodes in Meshtastic lib
-        if node_num is None: # Fallback if 'num' is not present (e.g. for myInfo processing)
+        node_num = node_data_dict.get('num')
+        if node_num is None:
             node_num = node_data_dict.get('myNodeNum')
 
         if node_num is None:
             logger.warning("Node update without 'num' or 'myNodeNum' received, ignoring.")
             return
 
-        node_id_str = get_node_id_str(node_num) # Convert num to !hex format
-        if not node_id_str: # Should not happen if node_num is valid
+        node_id_str = get_node_id_str(node_num)
+        if not node_id_str:
             logger.error(f"Could not generate a valid node ID for number {node_num}.")
             return
 
-        # Extract various parts of node information
         user_payload = node_data_dict.get('user', {}) if isinstance(node_data_dict.get('user'), dict) else {}
         pos_payload = node_data_dict.get('position', {}) if isinstance(node_data_dict.get('position'), dict) else {}
-        dev_metrics_payload = node_data_dict.get('deviceMetrics', {}) if isinstance(node_data_dict.get('deviceMetrics'), dict) else {}
-        # powerMetrics might be nested inside deviceMetrics or standalone
+        dev_metrics_payload = node_data_dict.get('deviceMetrics', {}) if isinstance(node_data_dict.get('deviceMetrics'),
+                                                                                    dict) else {}
         power_metrics_payload = node_data_dict.get('powerMetrics', dev_metrics_payload.get('powerMetrics', {})) \
             if isinstance(node_data_dict.get('powerMetrics', dev_metrics_payload.get('powerMetrics')), dict) else {}
-        env_metrics_payload = node_data_dict.get('environmentMetrics', {}) if isinstance(node_data_dict.get('environmentMetrics'), dict) else {}
+        env_metrics_payload = node_data_dict.get('environmentMetrics', {}) if isinstance(
+            node_data_dict.get('environmentMetrics'), dict) else {}
 
-
-        # Prepare a dictionary of defaults for update_or_create
         defaults_to_update = {
             'node_num': node_num,
-            'long_name': user_payload.get('longName', node_data_dict.get('longName')), # Prioritize user payload
+            'long_name': user_payload.get('longName', node_data_dict.get('longName')),
             'short_name': user_payload.get('shortName', node_data_dict.get('shortName')),
-            'macaddr': user_payload.get('macaddr'), # Usually in user payload
-            # hwModel can be an enum (so get .name) or a string. Also check various keys.
-            'hw_model': user_payload.get('hwModel') or node_data_dict.get('hwModelStr') or node_data_dict.get('hwVersion') or node_data_dict.get('pioEnv'),
+            'macaddr': user_payload.get('macaddr'),
+            'hw_model': user_payload.get('hwModel') or node_data_dict.get('hwModelStr') or node_data_dict.get(
+                'hwVersion') or node_data_dict.get('pioEnv'),
             'firmware_version': node_data_dict.get('firmwareVersion') or node_data_dict.get('swVersion'),
-            # role can be an enum
-            'role': getattr(user_payload.get('role'), 'name', str(user_payload.get('role', node_data_dict.get('role')))),
-            'is_local': node_data_dict.get('isLocal', False), # Important for identifying the connected radio
-            'last_heard': node_data_dict.get('lastHeard', time.time()), # Default to now if not present
+            'role': getattr(user_payload.get('role'), 'name',
+                            str(user_payload.get('role', node_data_dict.get('role')))),
+            'is_local': node_data_dict.get('isLocal', False),
+            'last_heard': node_data_dict.get('lastHeard', time.time()),
             'battery_level': dev_metrics_payload.get('batteryLevel', power_metrics_payload.get('batteryLevel')),
             'voltage': dev_metrics_payload.get('voltage', power_metrics_payload.get('voltage')),
             'channel_utilization': dev_metrics_payload.get('channelUtilization'),
             'air_util_tx': dev_metrics_payload.get('airUtilTx'),
             'uptime_seconds': dev_metrics_payload.get('uptimeSeconds'),
-            'snr': node_data_dict.get('snr'), # Overall SNR for the node
-            'rssi': node_data_dict.get('hopRssi', node_data_dict.get('rssi')), # hopRssi is often more relevant if present
-            'latitude': (pos_payload.get('latitudeI', 0) / 1e7) if pos_payload.get('latitudeI') is not None else pos_payload.get('latitude'),
-            'longitude': (pos_payload.get('longitudeI', 0) / 1e7) if pos_payload.get('longitudeI') is not None else pos_payload.get('longitude'),
+            'snr': node_data_dict.get('snr'),
+            'rssi': node_data_dict.get('hopRssi', node_data_dict.get('rssi')),
+            'latitude': (pos_payload.get('latitudeI', 0) / 1e7) if pos_payload.get(
+                'latitudeI') is not None else pos_payload.get('latitude'),
+            'longitude': (pos_payload.get('longitudeI', 0) / 1e7) if pos_payload.get(
+                'longitudeI') is not None else pos_payload.get('longitude'),
             'altitude': pos_payload.get('altitude'),
-            'position_time': pos_payload.get('time'), # Timestamp of this position update
-            'telemetry_time': dev_metrics_payload.get('time', power_metrics_payload.get('time')), # Timestamp of this telemetry update
-            'user_info': user_payload or None, # Store the dict or None
+            'position_time': pos_payload.get('time'),
+            'telemetry_time': dev_metrics_payload.get('time', power_metrics_payload.get('time')),
+            'user_info': user_payload or None,
             'position_info': pos_payload or None,
             'device_metrics_info': dev_metrics_payload or None,
             'environment_metrics_info': env_metrics_payload or None,
-            # Store module config and channel settings as JSON
             'module_config_info': node_data_dict.get('moduleConfig', node_data_dict.get('modulePrefs')),
             'channel_info': node_data_dict.get('channelSettings', node_data_dict.get('channels')),
         }
-        # Handle potential enum for hw_model again if it wasn't a string initially
         if hasattr(defaults_to_update['hw_model'], 'name'):
             defaults_to_update['hw_model'] = defaults_to_update['hw_model'].name
 
-        # If power_metrics was found and is different from what might be inside device_metrics, ensure it's stored.
-        # This ensures power_metrics data is captured even if it's a separate top-level field in node_data_dict.
-        if power_metrics_payload and (not defaults_to_update['device_metrics_info'] or defaults_to_update['device_metrics_info'].get('powerMetrics') != power_metrics_payload):
+        if power_metrics_payload and (
+                not defaults_to_update['device_metrics_info'] or defaults_to_update['device_metrics_info'].get(
+                'powerMetrics') != power_metrics_payload):
             if not defaults_to_update['device_metrics_info']: defaults_to_update['device_metrics_info'] = {}
             defaults_to_update['device_metrics_info']['powerMetricsFromNodeUpdate'] = power_metrics_payload
 
-
-        # Filter out None values to prevent overwriting existing DB fields with None if the update doesn't provide them
         update_values = {k: v for k, v in defaults_to_update.items() if v is not None}
-
 
         with transaction.atomic():
             node_obj, created = Node.objects.update_or_create(
-                node_id=node_id_str, # Primary key for lookup
+                node_id=node_id_str,
                 defaults=update_values
             )
         log_action = "created" if created else "updated"
@@ -866,85 +819,86 @@ def on_node_updated_django(node, interface): # node is a dict from the Meshtasti
 
 def on_connection_django(interface, topic=pub.AUTO_TOPIC, reason=None):
     global _local_node_channel_map_cache, _local_node_info_cache
-    topic_str = getattr(topic, 'getNamePath', lambda: str(topic))() # Get full topic path
+    topic_str = getattr(topic, 'getNamePath', lambda: str(topic))()
     logger.info(f"on_connection_django: Connection event: {topic_str}" + (f" Reason: {reason}" if reason else ""))
-    close_old_connections() # DB hygiene
+    close_old_connections()
 
     status_update = {'updated_at': django_timezone.now()}
-    new_status = ListenerState.STATUS_CHOICES[5][0] # Default to UNKNOWN ('UNKNOWN')
-    current_error_msg_for_state = reason # Use the provided reason as a potential error message
+    new_status = ListenerState.STATUS_CHOICES[5][0]
+    current_error_msg_for_state = reason
 
     if "meshtastic.connection.established" in topic_str:
-        new_status = ListenerState.STATUS_CHOICES[2][0] # CONNECTED
-        status_update['last_error_message'] = None # Clear any previous error
-        current_error_msg_for_state = None # No error for this state
+        new_status = ListenerState.STATUS_CHOICES[2][0]
+        status_update['last_error_message'] = None
+        current_error_msg_for_state = None
         logger.info("Meshtastic connection established.")
         try:
             if interface and hasattr(interface, 'myInfo') and interface.myInfo:
-                my_info_raw_obj = interface.myInfo # This is the protobuf object
-                my_info_dict = ensure_serializable(my_info_raw_obj) # Convert to dict
+                my_info_raw_obj = interface.myInfo
+                my_info_dict = ensure_serializable(my_info_raw_obj)
 
                 if not isinstance(my_info_dict, dict):
                     error_detail = f"Processed myInfo is not a dictionary (type: {type(my_info_dict)}, value: '{str(my_info_dict)[:200]}...'). Cannot extract local node details."
                     logger.error(error_detail)
                     status_update['last_error_message'] = error_detail
                     current_error_msg_for_state = error_detail
-                    _local_node_info_cache.clear() # Clear cache on error
+                    _local_node_info_cache.clear()
                 else:
                     local_node_num_int = my_info_dict.get('myNodeNum')
                     local_node_id_str = get_node_id_str(local_node_num_int) if local_node_num_int is not None else None
 
-                    user_info_from_myinfo = my_info_dict.get('user', {}) if isinstance(my_info_dict.get('user'), dict) else {}
+                    user_info_from_myinfo = my_info_dict.get('user', {}) if isinstance(my_info_dict.get('user'),
+                                                                                       dict) else {}
                     local_node_name_str = my_info_dict.get('longName') or \
                                           user_info_from_myinfo.get('longName') or \
                                           my_info_dict.get('shortName') or \
                                           user_info_from_myinfo.get('shortName')
 
-                    # Fallback name if none is set on the device
                     if not local_node_name_str and local_node_num_int is not None:
                         local_node_name_str = f"Node {local_node_num_int}"
-                    elif not local_node_name_str: # Absolute fallback
+                    elif not local_node_name_str:
                         local_node_name_str = f"Local Node ({local_node_id_str or 'Unknown ID'})"
-
 
                     status_update.update({
                         'local_node_id': local_node_id_str,
                         'local_node_num': local_node_num_int,
                         'local_node_name': local_node_name_str,
                     })
-                    _local_node_info_cache = {'id': local_node_id_str, 'num': local_node_num_int, 'name': local_node_name_str}
+                    _local_node_info_cache = {'id': local_node_id_str, 'num': local_node_num_int,
+                                              'name': local_node_name_str}
                     commander_logger.info(f"Local node cache updated: {_local_node_info_cache}")
 
-                    # Attempt to get channel map (internal ID to user index)
                     current_channel_map = {}
-                    if hasattr(interface, 'localNode') and interface.localNode and hasattr(interface.localNode, 'channels'):
-                        # localNode.channels is typically a list of Channel protobuf objects
+                    if hasattr(interface, 'localNode') and interface.localNode and hasattr(interface.localNode,
+                                                                                           'channels'):
                         if isinstance(interface.localNode.channels, list):
                             for ch_protobuf in interface.localNode.channels:
-                                # Ensure the protobuf has the expected structure
                                 if hasattr(ch_protobuf, 'index') and hasattr(ch_protobuf, 'settings') and \
-                                   hasattr(ch_protobuf.settings, 'id'):
+                                        hasattr(ch_protobuf.settings, 'id'):
                                     internal_channel_id_bytes = ch_protobuf.settings.id
                                     if isinstance(internal_channel_id_bytes, bytes):
                                         internal_channel_id_hex = internal_channel_id_bytes.hex()
                                         current_channel_map[internal_channel_id_hex] = ch_protobuf.index
-                                    else: # Should be bytes, but log if not
-                                        logger.warning(f"Channel settings ID is not bytes: {internal_channel_id_bytes}, type: {type(internal_channel_id_bytes)}")
+                                    else:
+                                        logger.warning(
+                                            f"Channel settings ID is not bytes: {internal_channel_id_bytes}, type: {type(internal_channel_id_bytes)}")
                                         current_channel_map[str(internal_channel_id_bytes)] = ch_protobuf.index
                                 else:
-                                    logger.warning(f"A channel object in localNode.channels is missing expected attributes. Channel: {ch_protobuf}")
+                                    logger.warning(
+                                        f"A channel object in localNode.channels is missing expected attributes. Channel: {ch_protobuf}")
                         else:
-                            logger.warning(f"interface.localNode.channels is not a list. Type: {type(interface.localNode.channels)}")
+                            logger.warning(
+                                f"interface.localNode.channels is not a list. Type: {type(interface.localNode.channels)}")
                     else:
-                        logger.warning("Could not get channel map: interface.localNode or interface.localNode.channels is missing or not as expected.")
+                        logger.warning(
+                            "Could not get channel map: interface.localNode or interface.localNode.channels is missing or not as expected.")
 
                     _local_node_channel_map_cache = current_channel_map
-                    status_update['local_node_channel_map_json'] = current_channel_map # Store as JSON
+                    status_update['local_node_channel_map_json'] = current_channel_map
                     logger.info(
                         f"Local node info: ID {local_node_id_str}, Name: {local_node_name_str}. Channel Map: {current_channel_map}")
 
-                    # Also trigger a node update for the local node to ensure its DB record is current
-                    on_node_updated_django(my_info_raw_obj, interface) # Pass the raw object
+                    on_node_updated_django(my_info_raw_obj, interface)
             else:
                 logger.warning("myInfo not available from interface on connection established.")
                 _local_node_info_cache.clear()
@@ -952,29 +906,30 @@ def on_connection_django(interface, topic=pub.AUTO_TOPIC, reason=None):
                 current_error_msg_for_state = status_update['last_error_message']
 
 
-        except AttributeError as ae: # Catch errors if myInfo structure is not as expected
+        except AttributeError as ae:
             logger.exception(f"AttributeError while processing myInfo: {ae}")
-            current_error_msg_for_state = status_update['last_error_message'] = f"Error processing local node info (AttributeError): {str(ae)}"
+            current_error_msg_for_state = status_update[
+                'last_error_message'] = f"Error processing local node info (AttributeError): {str(ae)}"
             _local_node_info_cache.clear()
-        except Exception as e: # Catch any other errors during myInfo processing
+        except Exception as e:
             logger.exception(f"General error processing myInfo on connection established: {e}")
-            current_error_msg_for_state = status_update['last_error_message'] = f"Error processing local node info: {str(e)}"
+            current_error_msg_for_state = status_update[
+                'last_error_message'] = f"Error processing local node info: {str(e)}"
             _local_node_info_cache.clear()
 
     elif "meshtastic.connection.lost" in topic_str:
-        new_status = ListenerState.STATUS_CHOICES[3][0] # DISCONNECTED
-        current_error_msg_for_state = current_error_msg_for_state or "Connection lost" # Use reason if provided
+        new_status = ListenerState.STATUS_CHOICES[3][0]
+        current_error_msg_for_state = current_error_msg_for_state or "Connection lost"
         logger.warning(f"Meshtastic connection lost. Reason: {current_error_msg_for_state}")
-        _local_node_channel_map_cache.clear() # Clear caches on disconnect
+        _local_node_channel_map_cache.clear()
         _local_node_info_cache.clear()
-        # Clear local node info in DB status
         status_update.update({
             'local_node_channel_map_json': {},
             'local_node_id': None, 'local_node_num': None, 'local_node_name': None
         })
 
-    elif "meshtastic.connection.failed" in topic_str: # Specifically for failed connection attempts
-        new_status = ListenerState.STATUS_CHOICES[4][0] # ERROR
+    elif "meshtastic.connection.failed" in topic_str:
+        new_status = ListenerState.STATUS_CHOICES[4][0]
         current_error_msg_for_state = current_error_msg_for_state or "Connection attempt failed (event)"
         logger.error(f"Meshtastic connection attempt failed. Reason: {current_error_msg_for_state}")
         _local_node_channel_map_cache.clear()
@@ -985,7 +940,6 @@ def on_connection_django(interface, topic=pub.AUTO_TOPIC, reason=None):
         })
 
     status_update['status'] = new_status
-    # Ensure last_error_message is set if there was a reason/error for this event
     if 'last_error_message' not in status_update and current_error_msg_for_state:
         status_update['last_error_message'] = current_error_msg_for_state
 
@@ -993,26 +947,25 @@ def on_connection_django(interface, topic=pub.AUTO_TOPIC, reason=None):
         ListenerState.objects.update_or_create(singleton_id=1, defaults=status_update)
 
     final_error_message_for_log = status_update.get('last_error_message')
-    logger.info(f"Listener status in DB: {new_status}" + (f" (Error: {final_error_message_for_log})" if final_error_message_for_log else ""))
+    logger.info(f"Listener status in DB: {new_status}" + (
+        f" (Error: {final_error_message_for_log})" if final_error_message_for_log else ""))
 
 
 class Command(BaseCommand):
     help = 'Starts the Meshtastic Listener to collect data and provide a send API.'
     _meshtastic_interface = None
-    FLASK_PORT = 5555 # Consider making this configurable via settings.py -> .env
+    FLASK_PORT = 5555
 
     def run_flask_app(self):
         global meshtastic_interface_instance_for_flask
-        meshtastic_interface_instance_for_flask = self._meshtastic_interface # Share interface
+        meshtastic_interface_instance_for_flask = self._meshtastic_interface
 
-        # Reduce Flask's default logging verbosity
         flask_log = logging.getLogger('werkzeug')
-        flask_log.setLevel(logging.ERROR) # Or WARNING
-        flask_app.logger.disabled = True # Disable Flask's own logger if too noisy
+        flask_log.setLevel(logging.ERROR)
+        flask_app.logger.disabled = True
 
         logger.info(f"Starting Flask API server on host 0.0.0.0, port {self.FLASK_PORT} in a separate thread...")
         try:
-            # debug=False and use_reloader=False are important for production/stability
             flask_app.run(host='0.0.0.0', port=self.FLASK_PORT, threaded=True, use_reloader=False, debug=False)
         except Exception as e:
             logger.exception(f"Flask API server failed to start or crashed: {e}")
@@ -1022,104 +975,134 @@ class Command(BaseCommand):
         logger.info("Meshtastic Listener Management Command started.")
 
         flask_api_thread = None
-        flask_thread_started_successfully = False # Track Flask thread state
+        flask_thread_started_successfully = False
 
-        # Initial DB state update
         close_old_connections()
         with transaction.atomic():
             ListenerState.objects.update_or_create(
                 singleton_id=1,
-                defaults={'status': ListenerState.STATUS_CHOICES[0][0], 'updated_at': django_timezone.now()} # INITIALIZING
+                defaults={'status': ListenerState.STATUS_CHOICES[0][0], 'updated_at': django_timezone.now()}
             )
 
-        # Get Meshtastic connection details from Django settings (which now reads from .env)
         host = settings.MESHTASTIC_DEVICE_HOST
         port = settings.MESHTASTIC_DEVICE_PORT
-        retry_delay = 5 # Initial retry delay in seconds
-        max_retry_delay = 60 # Max retry delay
+        retry_delay = 5
+        max_retry_delay = 60
 
-        # Subscribe to Meshtastic events
         pub.subscribe(on_receive_django, "meshtastic.receive")
         pub.subscribe(on_node_updated_django, "meshtastic.node.updated")
         pub.subscribe(on_connection_django, "meshtastic.connection.established")
         pub.subscribe(on_connection_django, "meshtastic.connection.lost")
-        pub.subscribe(on_connection_django, "meshtastic.connection.failed") # For explicit failure events
+        pub.subscribe(on_connection_django, "meshtastic.connection.failed")
 
         while True:
-            close_old_connections() # DB hygiene at start of loop
-            if self._meshtastic_interface is None: # If no interface, try to connect
+            close_old_connections()
+
+            # --- Neustart-Logik ---
+            try:
+                current_listener_state = ListenerState.objects.get(singleton_id=1)
+                if current_listener_state.restart_requested:
+                    logger.info("Restart request detected for the listener.")
+                    if self._meshtastic_interface:
+                        try:
+                            logger.info("Closing existing Meshtastic interface for restart...")
+                            self._meshtastic_interface.close()
+                        except Exception as e_close:
+                            logger.error(f"Error closing Meshtastic interface during restart: {e_close}")
+                    self._meshtastic_interface = None
+                    meshtastic_interface_instance_for_flask = None  # Auch für Flask zurücksetzen
+                    flask_thread_started_successfully = False  # Erfordert Neustart des Flask-Threads
+
+                    with transaction.atomic():
+                        ListenerState.objects.filter(singleton_id=1).update(
+                            status=ListenerState.STATUS_CHOICES[0][0],  # INITIALIZING
+                            restart_requested=False,  # Reset flag
+                            last_error_message="Listener restart initiated by user.",
+                            updated_at=django_timezone.now()
+                        )
+                    logger.info("Listener restart initiated. Will attempt to reconnect.")
+                    retry_delay = 1  # Sofortiger Neuverbindungsversuch
+                    # Der Flask-Thread wird im nächsten Durchlauf neu gestartet, wenn die Schnittstelle neu erstellt wird.
+            except ListenerState.DoesNotExist:
+                logger.warning("ListenerState not found in database. Cannot check for restart request.")
+            except OperationalError as oe_db:  # Handle potential DB connection issues
+                logger.error(f"Database error when checking for restart request: {oe_db}. Retrying DB operation later.")
+                time.sleep(retry_delay)  # Wait before next major operation
+                continue  # Skip to next iteration to retry DB op
+            except Exception as e_restart_check:
+                logger.exception(f"Unexpected error checking for listener restart: {e_restart_check}")
+            # --- Ende Neustart-Logik ---
+
+            if self._meshtastic_interface is None:
                 logger.info(f"Attempting to connect to Meshtastic: {host}:{port}")
-                with transaction.atomic(): # Update listener state to CONNECTING
+                with transaction.atomic():
                     ListenerState.objects.update_or_create(
                         singleton_id=1,
-                        defaults={'status': ListenerState.STATUS_CHOICES[1][0], 'last_error_message': None, # CONNECTING
+                        defaults={'status': ListenerState.STATUS_CHOICES[1][0], 'last_error_message': None,
                                   'updated_at': django_timezone.now()}
                     )
                 try:
                     self._meshtastic_interface = meshtastic.tcp_interface.TCPInterface(
                         hostname=host,
                         portNumber=port,
-                        noProto=False, # We need the full API
-                        # connect_timeout=10 # Optional: add a connection timeout
+                        noProto=False,
                     )
-                    # If interface created, connection events will handle status change to CONNECTED
+                    meshtastic_interface_instance_for_flask = self._meshtastic_interface  # Update Flask's interface instance
+
                     logger.info(f"TCPInterface object created for {host}:{port}. Waiting for connection events.")
 
-                    # (Re)start Flask API thread if needed
                     if not flask_api_thread or not flask_api_thread.is_alive():
                         logger.info("Meshtastic interface object (re)created. (Re)starting Flask API thread.")
                         flask_api_thread = threading.Thread(target=self.run_flask_app, daemon=True)
                         flask_api_thread.start()
-                        time.sleep(2) # Give Flask a moment to start
+                        time.sleep(2)
                         if flask_api_thread.is_alive():
                             logger.info("Flask API thread seems to be running.")
                             flask_thread_started_successfully = True
                         else:
                             logger.error("Flask API thread did not start correctly!")
                             flask_thread_started_successfully = False
-                    retry_delay = 5 # Reset retry delay on successful interface creation
+                    retry_delay = 5
 
                 except ConnectionRefusedError as e:
                     err_msg = f"Connection to {host}:{port} refused. Detail: {e}"
                     logger.error(err_msg)
-                    pub.sendMessage("meshtastic.connection.failed", interface=None, reason=err_msg) # Trigger our handler
-                    self._meshtastic_interface = None # Ensure it's None on failure
-                except meshtastic.MeshtasticException as e: # Catch specific Meshtastic errors
+                    pub.sendMessage("meshtastic.connection.failed", interface=None, reason=err_msg)
+                    self._meshtastic_interface = None
+                except meshtastic.MeshtasticException as e:
                     err_msg = f"Meshtastic library error: {e}"
                     logger.error(err_msg)
                     pub.sendMessage("meshtastic.connection.failed", interface=None, reason=err_msg)
                     self._meshtastic_interface = None
-                except Exception as e: # Catch any other unexpected errors during connection
+                except Exception as e:
                     err_msg = f"Unexpected error during connection attempt: {e}"
-                    logger.exception(err_msg) # Log with traceback
+                    logger.exception(err_msg)
                     pub.sendMessage("meshtastic.connection.failed", interface=None, reason=err_msg)
                     self._meshtastic_interface = None
 
-                if self._meshtastic_interface is None: # If connection failed
+                if self._meshtastic_interface is None:
                     logger.info(f"Connection attempt failed. Waiting {retry_delay}s...")
                     time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 2, max_retry_delay) # Exponential backoff
-                    flask_thread_started_successfully = False # Reset Flask status
-                    continue # Retry connection
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
+                    flask_thread_started_successfully = False
+                    continue
 
-            # If interface exists, monitor it and the Flask thread
             if self._meshtastic_interface:
                 try:
-                    # Check if Flask thread died while interface was up
                     if flask_thread_started_successfully and (not flask_api_thread or not flask_api_thread.is_alive()):
                         logger.warning(
                             "Flask API thread is no longer alive! Closing Meshtastic interface to trigger reconnect and Flask restart.")
                         if self._meshtastic_interface:
                             try:
                                 self._meshtastic_interface.close()
-                            except: pass # Ignore errors during close
+                            except:
+                                pass
                         self._meshtastic_interface = None
                         flask_thread_started_successfully = False
-                        continue # Will trigger reconnect logic
+                        continue
 
-                    # Check if Meshtastic interface socket is still valid (basic health check)
-                    # This check might need to be more robust depending on how TCPInterface handles disconnects
-                    if not (hasattr(self._meshtastic_interface, 'socket') and self._meshtastic_interface.socket is not None):
+                    if not (hasattr(self._meshtastic_interface,
+                                    'socket') and self._meshtastic_interface.socket is not None):
                         logger.warning(
                             "Meshtastic interface socket is None (periodic check). Connection might be lost.")
                         if self._meshtastic_interface:
@@ -1128,12 +1111,10 @@ class Command(BaseCommand):
                             except Exception as close_err:
                                 logger.error(f"Error during defensive close of interface: {close_err}")
                         self._meshtastic_interface = None
-                        flask_thread_started_successfully = False # Reset flask status
-                        # on_connection_lost should be triggered by the library if socket dies,
-                        # but this is a fallback.
+                        flask_thread_started_successfully = False
                         continue
 
-                    time.sleep(5) # Main loop sleep when connected and healthy
+                    time.sleep(5)
 
                 except KeyboardInterrupt:
                     self.stdout.write(self.style.WARNING(" Meshtastic Listener stopping..."))
@@ -1142,26 +1123,28 @@ class Command(BaseCommand):
                     close_old_connections()
                     with transaction.atomic():
                         ListenerState.objects.update_or_create(singleton_id=1, defaults={
-                            'status': ListenerState.STATUS_CHOICES[3][0], # DISCONNECTED
+                            'status': ListenerState.STATUS_CHOICES[3][0],
                             'last_error_message': "Listener shut down by user.",
+                            'restart_requested': False,  # Ensure flag is reset on shutdown
                             'updated_at': django_timezone.now()
                         })
-                    break # Exit the while True loop
-                except Exception as e: # Catch-all for unexpected errors in the operational loop
+                    break
+                except Exception as e:
                     logger.exception(f"Unexpected error in main listener operational loop: {e}")
                     if self._meshtastic_interface:
                         try:
                             self._meshtastic_interface.close()
-                        except: pass
+                        except:
+                            pass
                     self._meshtastic_interface = None
                     flask_thread_started_successfully = False
-                    # Update listener state to ERROR
                     with transaction.atomic():
                         ListenerState.objects.update_or_create(singleton_id=1, defaults={
-                            'status': ListenerState.STATUS_CHOICES[4][0], # ERROR
+                            'status': ListenerState.STATUS_CHOICES[4][0],
                             'last_error_message': f"Main loop error: {str(e)}",
+                            'restart_requested': False,  # Reset flag on error too
                             'updated_at': django_timezone.now()
                         })
-                    time.sleep(retry_delay) # Wait before trying to reconnect everything
-            else: # Should not be reached if logic is correct, but as a fallback
+                    time.sleep(retry_delay)
+            else:
                 time.sleep(retry_delay)
