@@ -1,3 +1,4 @@
+# metrastics/settings.py
 """
 Django settings for metrastics project.
 
@@ -77,6 +78,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                # 'metrastics.context_processors.global_settings_processor', # Removed this line
             ],
         },
     },
@@ -141,6 +143,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Meshtastic Settings from .env
 MESHTASTIC_DEVICE_HOST = os.getenv('MESHTASTIC_DEVICE_HOST', 'localhost')
 MESHTASTIC_DEVICE_PORT = int(os.getenv('MESHTASTIC_DEVICE_PORT', '4403'))
+# Port for the Flask app in listen_device.py that handles sending messages
+LISTENER_FLASK_PORT = os.getenv('LISTENER_FLASK_PORT', '5555')
+
 
 LOGGING = {
     'version': 1,
@@ -161,7 +166,7 @@ LOGGING = {
     },
     'handlers': {
         'console': {
-            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO').upper(), # Control log level via .env
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO').upper(),
             'class': 'logging.StreamHandler',
             'formatter': 'mesh_dashboard_formatter',
         },
@@ -174,12 +179,12 @@ LOGGING = {
         },
         'metrastics_listener.management.commands.listen_device': {
             'handlers': ['console'],
-            'level': os.getenv('LISTENER_LOG_LEVEL', 'DEBUG').upper(),
+            'level': os.getenv('LISTENER_LOG_LEVEL', 'INFO').upper(),
             'propagate': False,
         },
         'metrastics_commander': {
             'handlers': ['console'],
-            'level': os.getenv('COMMANDER_LOG_LEVEL', 'DEBUG').upper(),
+            'level': os.getenv('COMMANDER_LOG_LEVEL', 'INFO').upper(),
             'propagate': False,
         },
         'meshtastic': {
@@ -209,9 +214,8 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', "your_openai_api_key_here")
 CHATGPT_TRIGGER_COMMAND = os.getenv('CHATGPT_TRIGGER_COMMAND', "!chat")
 CHATGPT_SYSTEM_PROMPT = os.getenv('CHATGPT_SYSTEM_PROMPT', "You are a helpful assistant on a Meshtastic network. Keep your answers concise due to message length limitations. Max 200byte Answer")
 
-# Ensure OPENAI_API_KEY has a default or is checked before use to avoid errors if not set.
 if OPENAI_API_KEY == "your_openai_api_key_here" or not OPENAI_API_KEY:
     print("Warning: OPENAI_API_KEY is not set or using placeholder. ChatGPT features will not work.")
 
-if DEBUG and not SECRET_KEY.startswith('django-insecure'): # Check if using default dev key if real one isn't set
+if DEBUG and not SECRET_KEY.startswith('django-insecure'):
     print(f"Warning: Using a default SECRET_KEY ('{SECRET_KEY}') for development. Ensure a strong, unique key is set in your .env file for production.")

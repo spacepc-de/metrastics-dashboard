@@ -107,6 +107,17 @@
             border-radius: 0.25rem;
             border: 1px solid #dee2e6;
         }
+        .route-path-display {
+            font-family: monospace;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        .message-text-display {
+            max-width: 400px; /* Or your desired max-width */
+            white-space: pre-wrap; /* Allows wrapping */
+            word-break: break-word; /* Breaks long words */
+            font-size: 0.9em;
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
@@ -127,6 +138,12 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'map_page' %}active{% endif %}" href="{% url 'metrastics_dashboard:map_page' %}"><i class="bi bi-map-fill"></i> Map</a>
+                    </li>
+                     <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'messages_page' %}active{% endif %}" href="{% url 'metrastics_dashboard:messages_page' %}"><i class="bi bi-chat-left-text-fill"></i> Messages</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_dashboard' and request.resolver_match.url_name == 'traceroutes_page' %}active{% endif %}" href="{% url 'metrastics_dashboard:traceroutes_page' %}"><i class="bi bi-signpost-2-fill"></i> Traceroutes</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.resolver_match.app_name == 'metrastics_commander' and request.resolver_match.url_name == 'commander_page' %}active{% endif %}" href="{% url 'metrastics_commander:commander_page' %}"><i class="bi bi-robot"></i> Commander</a>
@@ -170,8 +187,8 @@
             // Try parsing ISO string first, then fallback to epoch string if it's purely numeric
             if (!/^\d+$/.test(timestampInput) && moment(timestampInput, moment.ISO_8601, true).isValid()) {
                 momentDate = moment(timestampInput);
-            } else if (/^\d+$/.test(timestampInput)) {
-                 momentDate = moment.unix(parseInt(timestampInput, 10));
+            } else if (/^\d+(\.\d+)?$/.test(timestampInput)) { // Support for float strings
+                 momentDate = moment.unix(parseFloat(timestampInput));
             } else {
                 return "Ungültiges Datum";
             }
@@ -193,18 +210,26 @@
         if (typeof timestampInput === 'number') {
             timestamp = timestampInput;
         } else if (typeof timestampInput === 'string' && !isNaN(Date.parse(timestampInput))) {
+            // Handles ISO strings like "2023-10-26T10:30:00Z" or "2023-10-26T12:30:00+02:00"
             timestamp = new Date(timestampInput).getTime() / 1000;
-        } else if (typeof timestampInput === 'string' && /^\d+$/.test(timestampInput)) {
-            timestamp = parseInt(timestampInput, 10);
+        } else if (typeof timestampInput === 'string' && /^\d+(\.\d+)?$/.test(timestampInput)) {
+             // Handles numeric strings representing Unix epoch (integer or float)
+            timestamp = parseFloat(timestampInput);
         }
         else {
+            // console.warn("formatTimeAgo: Invalid timestampInput format", timestampInput);
             return "Ungültiges Datum";
         }
+
 
         const now = moment(); // moment in local timezone
         const past = moment.unix(timestamp).tz(userTimeZone); // Convert epoch to moment in local timezone
 
-        if (!past.isValid()) return "Ungültiges Datum";
+        if (!past.isValid()) {
+            // console.warn("formatTimeAgo: Parsed date is invalid for input", timestampInput, "parsed as", past);
+            return "Ungültiges Datum";
+        }
+
 
         const duration = moment.duration(now.diff(past));
         const secondsPast = duration.asSeconds();
@@ -227,11 +252,14 @@
 
     function getNodeName(node) {
         if (!node) return 'Unbekannt';
-        return node.long_name || node.short_name || (node.node_id ? node.node_id.substring(0, 8) + "..." : 'Unbekannt');
+        let name = node.long_name || node.short_name || (node.node_id ? node.node_id : 'Unbekannt');
+        // Truncate very long names for display if necessary, but usually handled by table column width/CSS
+        // if (name.length > 20 && node.node_id) name = name.substring(0, 17) + "...";
+        return name;
     }
 
     function formatHwModel(hwModel) {
-        if (!hwModel) return 'N/A';
+        if (!hwModel || hwModel === "UNSET") return 'N/A'; // Added UNSET check
         let formatted = String(hwModel).replace(/_/g, ' ').replace(/-/g, ' ');
         formatted = formatted.replace(/\b(TLORA|T LORA)\b/gi, 'T-LoRa')
                            .replace(/\b(TBEAM|T BEAM)\b/gi, 'T-Beam')
@@ -242,7 +270,7 @@
         formatted = formatted.replace(/V(\d)\s?(\d)/gi, 'V$1.$2');
 
         // Capitalize first letter of each word for consistency, unless it's a common acronym
-        const acronyms = ['ESP32', 'NRF52', 'GPS', 'DIY', 'RAK', 'SPI', 'I2C', 'BLE', 'WIFI'];
+        const acronyms = ['ESP32', 'NRF52', 'GPS', 'DIY', 'RAK', 'SPI', 'I2C', 'BLE', 'WIFI', 'SX1262', 'SX1276', 'RP2040'];
         formatted = formatted.split(' ').map(word => {
             if (acronyms.includes(word.toUpperCase())) return word.toUpperCase();
             if (word.match(/^V\d+(\.\d+)?$/i)) return word; // Preserve version numbers like V1.0
@@ -258,24 +286,27 @@
 
         if (batteryLevel === 255 || ((batteryLevel === null || batteryLevel === undefined) && voltage && voltage > 4.5) ) {
             batteryIcon = '<i class="bi bi-power text-primary"></i>';
-            text = 'Stromversorgung';
+            text = 'Strom'; // Kürzer für "Stromversorgung"
              if (voltage) text += ` (${voltage.toFixed(2)}V)`;
         } else if (batteryLevel !== null && batteryLevel !== undefined && batteryLevel >= 0 && batteryLevel <= 100) {
             text = batteryLevel + '%';
-            if (batteryLevel < 20) {
+            if (batteryLevel < 10) { // Changed threshold for danger
                 batteryIcon = '<i class="bi bi-battery text-danger"></i>';
+            } else if (batteryLevel < 20) {
+                batteryIcon = '<i class="bi bi-battery-charging text-danger"></i>'; // Example: using charging icon for very low
             } else if (batteryLevel < 50) {
                 batteryIcon = '<i class="bi bi-battery-half text-warning"></i>';
             } else {
                 batteryIcon = '<i class="bi bi-battery-full text-success"></i>';
             }
-        } else if (voltage) {
+        } else if (voltage) { // Fallback to voltage if batteryLevel is not useful
              text = voltage.toFixed(2) + 'V';
-             if (voltage < 3.3) batteryIcon = '<i class="bi bi-battery text-danger"></i>';
-             else if (voltage < 3.7) batteryIcon = '<i class="bi bi-battery-half text-warning"></i>';
-             else batteryIcon = '<i class.bi bi-battery-full text-success"></i>';
+             // Simple voltage-based icon (adjust thresholds as needed for your devices)
+             if (voltage < 3.3) batteryIcon = '<i class="bi bi-battery text-danger"></i>'; // Critically low for LiPo
+             else if (voltage < 3.7) batteryIcon = '<i class="bi bi-battery-half text-warning"></i>'; // Low for LiPo
+             else batteryIcon = '<i class="bi bi-battery-full text-success"></i>'; // Assumed good
         }
-        return `${batteryIcon} ${text}`;
+        return `<span title="${text}">${batteryIcon} ${text}</span>`;
     }
 
     function escapeHtml(unsafe) {
@@ -294,11 +325,12 @@
         }
         try {
             const jsonString = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
-            if (jsonString === "{}" && typeof payload === 'object' && Object.keys(payload).length === 0) {
+            if (jsonString === "{}" && typeof payload === 'object' && Object.keys(payload).length === 0) { // Check for empty objects specifically
                  return `<p class="text-muted"><em>${escapeHtml(title)}: Leer</em></p>`;
             }
             return `<h6>${escapeHtml(title)}</h6><pre class="json-payload m-0"><code>${escapeHtml(jsonString)}</code></pre>`;
         } catch (e) {
+            // If stringify fails, or for non-JSON string payloads, display as is.
             return `<h6>${escapeHtml(title)}</h6><pre class="json-payload m-0"><code>${escapeHtml(String(payload))}</code></pre>`;
         }
     }

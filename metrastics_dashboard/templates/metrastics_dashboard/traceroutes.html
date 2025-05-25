@@ -1,0 +1,149 @@
+{% extends "metrastics_dashboard/base.html" %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Traceroutes - Metrastics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-signpost-2-fill"></i> All Traceroutes</span>
+                         <form class="d-flex" id="searchTracerouteForm">
+                            <input class="form-control me-2" type="search" placeholder="Search Traceroutes (Node, Event ID)" aria-label="Search" id="tracerouteSearchInput">
+                            <button class="btn btn-outline-success" type="submit"><i class="bi bi-search"></i></button>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Requester</th>
+                                    <th>Responder</th>
+                                    <th>Route Path</th>
+                                    <th>Event ID</th>
+                                </tr>
+                            </thead>
+                            <tbody id="traceroutesTableBody">
+                                <tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Loading traceroutes...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <nav aria-label="Traceroute pagination">
+                        <ul class="pagination justify-content-center" id="traceroutePagination">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentTraceroutesPage = 1;
+    let currentTraceroutesSearchTerm = '';
+
+    function displayTraceroutes(data) {
+        const traceroutesTableBody = $('#traceroutesTableBody');
+        traceroutesTableBody.empty();
+
+        if (!data.traceroutes || data.traceroutes.length === 0) {
+            traceroutesTableBody.html('<tr><td colspan="5" class="text-center">No traceroutes found matching your criteria.</td></tr>');
+            $('#traceroutePagination').empty();
+            return;
+        }
+
+        data.traceroutes.forEach(tr => {
+            const requesterNodeDisplay = `<span title="${escapeHtml(tr.requester_node_id_str || '')}">${escapeHtml(getNodeName({long_name: tr.requester_node_name, node_id: tr.requester_node_id_str}))}</span>`;
+            const responderNodeDisplay = `<span title="${escapeHtml(tr.responder_node_id_str || '')}">${escapeHtml(getNodeName({long_name: tr.responder_node_name, node_id: tr.responder_node_id_str}))}</span>`;
+
+            let routePathDisplay = 'N/A';
+            if (tr.route_json && Array.isArray(tr.route_json)) {
+                routePathDisplay = tr.route_json.map(nodeNum => `!${nodeNum.toString(16).padStart(8, '0')}`).join(' <i class="bi bi-arrow-right-short"></i> ');
+            }
+
+
+            const row = `
+                <tr>
+                    <td data-label="Timestamp" title="${escapeHtml(formatTimestamp(tr.timestamp, 'YYYY-MM-DD HH:mm:ss Z'))}">${escapeHtml(formatTimeAgo(tr.timestamp))}</td>
+                    <td data-label="Requester">${requesterNodeDisplay}</td>
+                    <td data-label="Responder">${responderNodeDisplay}</td>
+                    <td data-label="Route Path" class="route-path-display">${routePathDisplay}</td>
+                    <td data-label="Event ID">${escapeHtml(tr.packet_event_id || 'N/A')}</td>
+                </tr>`;
+            traceroutesTableBody.append(row);
+        });
+        renderTraceroutePagination(data.total_traceroutes, data.page, data.pages);
+    }
+
+    function renderTraceroutePagination(totalTraceroutes, currentPage, totalPages) {
+        const paginationUl = $('#traceroutePagination');
+        paginationUl.empty();
+
+        if (totalPages <= 1) return;
+
+        paginationUl.append(`<li class="page-item ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a></li>`);
+
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, currentPage + 2);
+        if (currentPage <= 3) endPage = Math.min(totalPages, 5);
+        if (currentPage > totalPages - 3) startPage = Math.max(1, totalPages - 4);
+
+        if (startPage > 1) {
+            paginationUl.append(`<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`);
+            if (startPage > 2) paginationUl.append(`<li class="page-item disabled"><span class="page-link">...</span></li>`);
+        }
+        for (let i = startPage; i <= endPage; i++) {
+            paginationUl.append(`<li class="page-item ${i === currentPage ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`);
+        }
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) paginationUl.append(`<li class="page-item disabled"><span class="page-link">...</span></li>`);
+            paginationUl.append(`<li class="page-item"><a class="page-link" href="#" data-page="${totalPages}">${totalPages}</a></li>`);
+        }
+
+        paginationUl.append(`<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage + 1}">Next</a></li>`);
+
+        $('.page-link').on('click', function(e) {
+            e.preventDefault();
+            const page = parseInt($(this).data('page'));
+            if (!isNaN(page) && page > 0 && page <= totalPages && page !== currentPage) {
+                fetchTraceroutes(page, currentTraceroutesSearchTerm);
+            }
+        });
+    }
+
+    function fetchTraceroutes(page = 1, searchTerm = '') {
+        currentTraceroutesPage = page;
+        currentTraceroutesSearchTerm = searchTerm;
+        $('#traceroutesTableBody').html('<tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Fetching traceroutes...</td></tr>');
+        $.getJSON("{% url 'metrastics_dashboard:api_get_traceroutes' %}", { page: page, q: searchTerm }, function(data) {
+            displayTraceroutes(data);
+        }).fail(function() {
+            $('#traceroutesTableBody').html('<tr><td colspan="5" class="text-center text-danger">Error loading traceroutes. Please try again later.</td></tr>');
+        });
+    }
+
+     $('#searchTracerouteForm').on('submit', function(event) {
+        event.preventDefault();
+        const searchTerm = $('#tracerouteSearchInput').val();
+        fetchTraceroutes(1, searchTerm);
+    });
+
+    $(document).ready(function() {
+        fetchTraceroutes(currentTraceroutesPage, currentTraceroutesSearchTerm);
+         setInterval(function() {
+            if (currentTraceroutesPage === 1 && currentTraceroutesSearchTerm === '') {
+                fetchTraceroutes(1, '');
+            }
+        }, 30000); // Refresh every 30 seconds
+    });
+</script>
+{% endblock %}

@@ -19,6 +19,7 @@ import meshtastic
 import meshtastic.tcp_interface
 from pubsub import pub
 from flask import Flask, request as flask_request, jsonify
+from flask_cors import CORS # Import CORS
 import requests
 import openai
 
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 commander_logger = logging.getLogger('metrastics_commander')
 
 flask_app = Flask(__name__)
+# Apply CORS to the Flask app.
+# For development, you can allow all origins with origins="*"
+# For production, you might want to restrict it to your Django app's origin, e.g., "http://127.0.0.1:8000"
+CORS(flask_app)
+# Alternatively, for more specific origin control:
+# CORS(flask_app, resources={r"/send_meshtastic_message": {"origins": "http://127.0.0.1:8000"}})
+
+
 meshtastic_interface_instance_for_flask = None
 
 
@@ -167,8 +176,15 @@ def format_timestamp_for_template(timestamp_epoch, default_val="N/A"):
         return default_val
 
 
-@flask_app.route('/send_meshtastic_message', methods=['POST'])
+@flask_app.route('/send_meshtastic_message', methods=['POST', 'OPTIONS']) # Add OPTIONS method
 def handle_send_meshtastic_message():
+    # For OPTIONS requests, Flask-CORS will handle it automatically if configured.
+    # You might not even need to check request.method == 'OPTIONS' explicitly.
+    if flask_request.method == 'OPTIONS':
+        # Flask-CORS should handle this, but if not, you can return a 200 OK.
+        # The important part is that Flask-CORS adds the headers.
+        return jsonify({"status": "success", "message": "CORS preflight successful"}), 200
+
     global meshtastic_interface_instance_for_flask
     if not meshtastic_interface_instance_for_flask:
         logger.error("Flask: Meshtastic interface not available.")
@@ -524,7 +540,7 @@ def on_receive_django(packet, interface):
                     from_node_id_str=from_id_str,
                     to_node=to_node_obj,
                     to_node_id_str=to_id_str,
-                    channel=original_internal_channel_id,
+                    channel=original_internal_channel_id, # Store the raw internal channel ID hex string
                     text=str(payload_specific_data),
                     timestamp=packet_obj.timestamp,
                     rx_snr=packet_obj.rx_snr,
@@ -532,7 +548,7 @@ def on_receive_django(packet, interface):
                 )
                 if message_obj_for_commander:
                     process_commander_rules(message_obj_for_commander, from_node_obj, flask_send_url,
-                                            mapped_channel_index)
+                                            mapped_channel_index) # Pass the mapped user-facing channel index
 
 
             elif app_packet_type == "Position" and payload_specific_data and from_node_obj:
@@ -954,25 +970,43 @@ def on_connection_django(interface, topic=pub.AUTO_TOPIC, reason=None):
 class Command(BaseCommand):
     help = 'Starts the Meshtastic Listener to collect data and provide a send API.'
     _meshtastic_interface = None
-    FLASK_PORT = 5555
+    FLASK_PORT = 5555 # This is the hardcoded port for the Flask app
 
     def run_flask_app(self):
         global meshtastic_interface_instance_for_flask
         meshtastic_interface_instance_for_flask = self._meshtastic_interface
 
         flask_log = logging.getLogger('werkzeug')
-        flask_log.setLevel(logging.ERROR)
-        flask_app.logger.disabled = True
+        flask_log.setLevel(logging.ERROR) # Keep Flask's own logging quiet
+        # flask_app.logger.disabled = True # This might be too aggressive; werkzeug logger is better
 
         logger.info(f"Starting Flask API server on host 0.0.0.0, port {self.FLASK_PORT} in a separate thread...")
         try:
-            flask_app.run(host='0.0.0.0', port=self.FLASK_PORT, threaded=True, use_reloader=False, debug=False)
+            # Use the FLASK_PORT from settings if available, otherwise default
+            actual_flask_port = getattr(settings, 'LISTENER_FLASK_PORT', self.FLASK_PORT)
+            if isinstance(actual_flask_port, str): actual_flask_port = int(actual_flask_port)
+
+            if actual_flask_port != self.FLASK_PORT: # Update class default if setting is different for consistency
+                logger.info(f"Overriding hardcoded FLASK_PORT ({self.FLASK_PORT}) with LISTENER_FLASK_PORT from settings: {actual_flask_port}")
+                Command.FLASK_PORT = actual_flask_port # Update for flask_send_url in on_receive_django
+
+            flask_app.run(host='0.0.0.0', port=actual_flask_port, threaded=True, use_reloader=False, debug=False)
         except Exception as e:
             logger.exception(f"Flask API server failed to start or crashed: {e}")
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS("Starting Meshtastic Listener with Send API..."))
         logger.info("Meshtastic Listener Management Command started.")
+
+        # Update Command.FLASK_PORT from Django settings if available
+        # This makes the flask_send_url in on_receive_django use the configured port
+        try:
+            configured_flask_port = getattr(settings, 'LISTENER_FLASK_PORT', str(Command.FLASK_PORT))
+            Command.FLASK_PORT = int(configured_flask_port)
+            logger.info(f"Flask app within listener will run on port {Command.FLASK_PORT} (from settings or default).")
+        except ValueError:
+            logger.error(f"Invalid LISTENER_FLASK_PORT value in settings: {settings.LISTENER_FLASK_PORT}. Using default {Command.FLASK_PORT}.")
+            Command.FLASK_PORT = 5555 # Fallback to original hardcoded default
 
         flask_api_thread = None
         flask_thread_started_successfully = False
@@ -998,7 +1032,6 @@ class Command(BaseCommand):
         while True:
             close_old_connections()
 
-            # --- Neustart-Logik ---
             try:
                 current_listener_state = ListenerState.objects.get(singleton_id=1)
                 if current_listener_state.restart_requested:
@@ -1010,28 +1043,26 @@ class Command(BaseCommand):
                         except Exception as e_close:
                             logger.error(f"Error closing Meshtastic interface during restart: {e_close}")
                     self._meshtastic_interface = None
-                    meshtastic_interface_instance_for_flask = None  # Auch für Flask zurücksetzen
-                    flask_thread_started_successfully = False  # Erfordert Neustart des Flask-Threads
+                    meshtastic_interface_instance_for_flask = None
+                    flask_thread_started_successfully = False
 
                     with transaction.atomic():
                         ListenerState.objects.filter(singleton_id=1).update(
-                            status=ListenerState.STATUS_CHOICES[0][0],  # INITIALIZING
-                            restart_requested=False,  # Reset flag
+                            status=ListenerState.STATUS_CHOICES[0][0],
+                            restart_requested=False,
                             last_error_message="Listener restart initiated by user.",
                             updated_at=django_timezone.now()
                         )
                     logger.info("Listener restart initiated. Will attempt to reconnect.")
-                    retry_delay = 1  # Sofortiger Neuverbindungsversuch
-                    # Der Flask-Thread wird im nächsten Durchlauf neu gestartet, wenn die Schnittstelle neu erstellt wird.
+                    retry_delay = 1
             except ListenerState.DoesNotExist:
                 logger.warning("ListenerState not found in database. Cannot check for restart request.")
-            except OperationalError as oe_db:  # Handle potential DB connection issues
+            except OperationalError as oe_db:
                 logger.error(f"Database error when checking for restart request: {oe_db}. Retrying DB operation later.")
-                time.sleep(retry_delay)  # Wait before next major operation
-                continue  # Skip to next iteration to retry DB op
+                time.sleep(retry_delay)
+                continue
             except Exception as e_restart_check:
                 logger.exception(f"Unexpected error checking for listener restart: {e_restart_check}")
-            # --- Ende Neustart-Logik ---
 
             if self._meshtastic_interface is None:
                 logger.info(f"Attempting to connect to Meshtastic: {host}:{port}")
@@ -1047,7 +1078,7 @@ class Command(BaseCommand):
                         portNumber=port,
                         noProto=False,
                     )
-                    meshtastic_interface_instance_for_flask = self._meshtastic_interface  # Update Flask's interface instance
+                    meshtastic_interface_instance_for_flask = self._meshtastic_interface
 
                     logger.info(f"TCPInterface object created for {host}:{port}. Waiting for connection events.")
 
@@ -1125,7 +1156,7 @@ class Command(BaseCommand):
                         ListenerState.objects.update_or_create(singleton_id=1, defaults={
                             'status': ListenerState.STATUS_CHOICES[3][0],
                             'last_error_message': "Listener shut down by user.",
-                            'restart_requested': False,  # Ensure flag is reset on shutdown
+                            'restart_requested': False,
                             'updated_at': django_timezone.now()
                         })
                     break
@@ -1142,7 +1173,7 @@ class Command(BaseCommand):
                         ListenerState.objects.update_or_create(singleton_id=1, defaults={
                             'status': ListenerState.STATUS_CHOICES[4][0],
                             'last_error_message': f"Main loop error: {str(e)}",
-                            'restart_requested': False,  # Reset flag on error too
+                            'restart_requested': False,
                             'updated_at': django_timezone.now()
                         })
                     time.sleep(retry_delay)

@@ -5,3 +5,4 @@ requests # Wird von process_commander_rules benötigt, um den HTTP-Request zu se
 python-dotenv
 dj-database-url
 openai
+flask-cors

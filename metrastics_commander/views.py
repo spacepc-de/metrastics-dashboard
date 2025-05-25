@@ -6,6 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from .models import CommanderRule
 from django.conf import settings # Import settings
+import os
 
 # @login_required # Uncomment if login is required
 def commander_page(request):
