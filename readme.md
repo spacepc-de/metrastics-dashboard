@@ -47,7 +47,7 @@ Metrastics is a Django-based web application designed to listen to a Meshtastic 
 
 The project is organized into three main Django apps:
 
-* `metrastics_listener`: Contains models for all Meshtastic data (Node, Packet, Message, Position, Telemetry, etc.) and the management command (`listen_device`) responsible for connecting to the Meshtastic device, processing incoming data, and saving it to the database. It also handles the Flask-based API endpoint for sending messages.
+* `metrastics_listener`: Contains models for all Meshtastic data (Node, Packet, Message, Position, Telemetry, etc.) and the management command (`listen_device`) responsible for connecting to the Meshtastic device, processing incoming data, and saving it to the database. It also handles the Flask-based API endpoint for sending messages and is configured to start automatically with the Django development server.
 * `metrastics_dashboard`: Provides the views, templates, and API endpoints for the web-based user interface where users can view the collected data, node details, maps, and live feeds.
 * `metrastics_commander`: Manages the rules for automated responses and the ChatGPT integration. It includes models for `CommanderRule` and views for managing these rules via the UI and an API.
 
@@ -55,8 +55,8 @@ The project is organized into three main Django apps:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <repository-url>
-    cd metrastics
+    git clone [https://github.com/spacepc-de/metrastics-dashboard.git](https://github.com/spacepc-de/metrastics-dashboard.git)
+    cd metrastics-dashboard 
     ```
 
 2.  **Create and Activate a Virtual Environment:**
@@ -124,20 +124,12 @@ The project is organized into three main Django apps:
     ```
     Follow the prompts to create an administrator account.
 
-7.  **Start the Meshtastic Listener:**
-    This command connects to your Meshtastic device and starts populating the database.
-    ```bash
-    python manage.py listen_device
-    ```
-   
-    Keep this running in a separate terminal. This script also starts a small Flask server on port 5555 (by default) to handle message sending requests from the Commander module.
-
-8.  **Start the Django Development Server:**
-    In another terminal:
+7.  **Start the Django Development Server:**
     ```bash
     python manage.py runserver
     ```
-    By default, this will be accessible at `http://127.0.0.1:8000/`.
+    The Meshtastic listener (`listen_device` command) is configured to start automatically in a separate thread when the Django development server starts. You should see log messages indicating its startup in the console.
+    By default, the web application will be accessible at `http://127.0.0.1:8000/`.
 
 ## Usage
 
@@ -175,7 +167,7 @@ Please make sure to update tests as appropriate.
 
 MIT License
 
-Copyright (c) [Jahr] Jonathan Stöcklmayer - Metrastics
+Copyright (c) 2025 Jonathan Stöcklmayer - Metrastics
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
