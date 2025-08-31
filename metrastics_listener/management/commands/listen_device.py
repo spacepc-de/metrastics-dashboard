@@ -24,7 +24,7 @@ import requests
 import openai
 
 from metrastics_listener.models import Node, Packet, Message, Position, Telemetry, ListenerState, Traceroute
-from metrastics_commander.models import CommanderRule
+from metrastics_commander.models import CommanderRule, CommanderSettings
 
 logger = logging.getLogger(__name__)
 commander_logger = logging.getLogger('metrastics_commander')
@@ -278,11 +278,18 @@ def process_commander_rules(incoming_message_obj: Message, from_node_obj: Node, 
     now_iso = now_utc.isoformat()
 
     chatgpt_trigger = settings.CHATGPT_TRIGGER_COMMAND
-    if message_text.lower().startswith(chatgpt_trigger.lower()):
-        user_query = message_text[len(chatgpt_trigger):].strip()
+    chatbot_mode_enabled = CommanderSettings.get_solo().chatbot_mode_enabled
+    trigger_matched = message_text.lower().startswith(chatgpt_trigger.lower())
+    if chatbot_mode_enabled or trigger_matched:
+        if chatbot_mode_enabled and trigger_matched:
+            user_query = message_text[len(chatgpt_trigger):].strip()
+        elif chatbot_mode_enabled:
+            user_query = message_text.strip()
+        else:
+            user_query = message_text[len(chatgpt_trigger):].strip()
         if user_query:
             commander_logger.info(
-                f"ChatGPT command '{chatgpt_trigger}' triggered by {sender_node_id} with query: '{user_query}'")
+                f"ChatGPT command '{chatgpt_trigger}' triggered by {sender_node_id} with query: '{user_query}'" if trigger_matched else f"Chatbot mode enabled: forwarding message from {sender_node_id}")
             chatgpt_response = call_chatgpt_api(user_query)
             if chatgpt_response:
                 max_len = 220

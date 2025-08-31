@@ -1,17 +1,17 @@
 # metrastics_commander/views.py
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
-from django.views.decorators.http import require_POST, require_GET
+from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 import json
-from .models import CommanderRule
-from django.conf import settings # Import settings
-import os
+from .models import CommanderRule, CommanderSettings
+from django.conf import settings  # Import settings
 
 # @login_required # Uncomment if login is required
 def commander_page(request):
     rules = CommanderRule.objects.all()
     chatgpt_trigger_command = getattr(settings, 'CHATGPT_TRIGGER_COMMAND', '!chat')
+    chatbot_mode_enabled = CommanderSettings.get_solo().chatbot_mode_enabled
     placeholders = [
         {"name": "<SENDER_ID>", "desc": "ID of the sender node (e.g., !abcdef12)."},
         {"name": "<SENDER_NUM>", "desc": "Number of the sender node."},
@@ -41,6 +41,7 @@ def commander_page(request):
         'placeholders': placeholders,
         'match_type_choices': CommanderRule.MATCH_TYPE_CHOICES,
         'chatgpt_trigger_command': chatgpt_trigger_command,
+        'chatbot_mode_enabled': chatbot_mode_enabled,
     }
     return render(request, 'metrastics_commander/commander.html', context)
 
@@ -108,3 +109,17 @@ def api_delete_commander_rule(request, rule_id):
         return JsonResponse({'status': 'success', 'message': 'Rule successfully deleted.'})
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': f'An error occurred: {str(e)}'}, status=500)
+
+
+@require_http_methods(["GET", "POST"])
+def api_chatbot_mode(request):
+    settings_obj = CommanderSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse({'enabled': settings_obj.chatbot_mode_enabled})
+    try:
+        data = json.loads(request.body)
+        settings_obj.chatbot_mode_enabled = bool(data.get('enabled', False))
+        settings_obj.save(update_fields=['chatbot_mode_enabled'])
+        return JsonResponse({'status': 'success', 'enabled': settings_obj.chatbot_mode_enabled})
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON format.'}, status=400)

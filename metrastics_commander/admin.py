@@ -1,6 +1,6 @@
 # metrastics_commander/admin.py
 from django.contrib import admin
-from .models import CommanderRule
+from .models import CommanderRule, CommanderSettings
 
 @admin.register(CommanderRule)
 class CommanderRuleAdmin(admin.ModelAdmin):
@@ -33,3 +33,8 @@ class CommanderRuleAdmin(admin.ModelAdmin):
             "&lt;CURRENT_TIME_ISO&gt;, &lt;CURRENT_TIME_UTC_HHMMSS&gt;"
         )
         return form
+
+
+@admin.register(CommanderSettings)
+class CommanderSettingsAdmin(admin.ModelAdmin):
+    list_display = ('chatbot_mode_enabled',)

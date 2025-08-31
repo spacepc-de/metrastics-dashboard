@@ -11,7 +11,8 @@
             <div class="card shadow-sm">
                 <div class="card-header">
                     <i class="bi bi-robot"></i> Commander Rules
-                     <a href="{% url 'admin:metrastics_commander_commanderrule_add' %}" class="btn btn-success btn-sm float-end ms-2" target="_blank"><i class="bi bi-plus-circle"></i> Add Rule (Admin)</a>
+                    <a href="{% url 'admin:metrastics_commander_commanderrule_add' %}" class="btn btn-success btn-sm float-end ms-2" target="_blank"><i class="bi bi-plus-circle"></i> Add Rule (Admin)</a>
+                    <button id="chatbotModeBtn" class="btn btn-outline-warning btn-sm float-end me-2" data-enabled="{{ chatbot_mode_enabled|yesno:'true,false' }}"><i class="bi bi-chat-dots"></i> Chatbot Mode: Off</button>
                     <button class="btn btn-info btn-sm float-end me-2" onclick="fetchAllRules()"><i class="bi bi-arrow-clockwise"></i> Refresh Rules</button>
                 </div>
                 <div class="card-body">
@@ -189,6 +190,35 @@
     }
     const csrftoken = getCookie('csrftoken');
 
+    function updateChatbotModeButton(enabled) {
+        const btn = $('#chatbotModeBtn');
+        btn.data('enabled', enabled);
+        if (enabled) {
+            btn.removeClass('btn-outline-warning').addClass('btn-warning');
+            btn.html('<i class="bi bi-chat-dots"></i> Chatbot Mode: On');
+        } else {
+            btn.removeClass('btn-warning').addClass('btn-outline-warning');
+            btn.html('<i class="bi bi-chat-dots"></i> Chatbot Mode: Off');
+        }
+    }
+
+    $('#chatbotModeBtn').on('click', function() {
+        const newState = !$(this).data('enabled');
+        $.ajax({
+            url: '/commander/api/chatbot-mode/',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({enabled: newState}),
+            headers: {"X-CSRFToken": csrftoken},
+            success: function(response) {
+                updateChatbotModeButton(response.enabled);
+            },
+            error: function() {
+                alert('Error toggling Chatbot Mode.');
+            }
+        });
+    });
+
     function formatRuleRow(rule) {
         return `
             <td data-label="Name">${escapeHtml(rule.name)}</td>
@@ -326,6 +356,7 @@
 
     $(document).ready(function() {
         attachButtonListeners();
+        updateChatbotModeButton({{ chatbot_mode_enabled|yesno:"true,false" }});
         // If you need to initialize anything else on page load, do it here.
         // For example, if `match_type_choices` needs to be fetched or if `WorkspaceAllRules()` should run on load:
         // fetchAllRules(); // Uncomment if rules should be loaded immediately without server-side rendering them initially

@@ -40,3 +40,23 @@ class CommanderRule(models.Model):
         ordering = ['name']
         verbose_name = "Commander Regel"
         verbose_name_plural = "Commander Regeln"
+
+
+class CommanderSettings(models.Model):
+    """Singleton model to store commander-wide settings."""
+    chatbot_mode_enabled = models.BooleanField(
+        default=False,
+        help_text="Wenn aktiviert, werden alle Nachrichten direkt an ChatGPT weitergeleitet.",
+    )
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Commander Einstellungen"
+
+    class Meta:
+        verbose_name = "Commander Einstellung"
+        verbose_name_plural = "Commander Einstellungen"
