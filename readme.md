@@ -131,6 +131,19 @@ The project is organized into three main Django apps:
     The Meshtastic listener (`listen_device` command) is configured to start automatically in a separate thread when the Django development server starts. You should see log messages indicating its startup in the console.
     By default, the web application will be accessible at `http://127.0.0.1:8000/`.
 
+## Run with Docker Compose
+
+An easier way to start the project is via Docker Compose. This builds a container with all dependencies and runs the Django development server.
+
+1. Copy `.env.example` to `.env` and adjust values as needed.
+2. Build and start the service:
+
+    ```bash
+    docker-compose up --build
+    ```
+
+   The dashboard will be available at [http://localhost:8000](http://localhost:8000).
+
 ## Usage
 
 * **Dashboard:** Access the main dashboard at `http://127.0.0.1:8000/dashboard/` (or the root `/` if configured as such).
