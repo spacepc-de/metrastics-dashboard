@@ -219,3 +219,5 @@ if OPENAI_API_KEY == "your_openai_api_key_here" or not OPENAI_API_KEY:
 
 if DEBUG and not SECRET_KEY.startswith('django-insecure'):
     print(f"Warning: Using a default SECRET_KEY ('{SECRET_KEY}') for development. Ensure a strong, unique key is set in your .env file for production.")
+
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
