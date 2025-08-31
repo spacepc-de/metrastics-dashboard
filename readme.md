@@ -37,16 +37,17 @@ Metrastics is a Django-based web application designed to listen to a Meshtastic 
 * **Backend:** Django, Python
 * **Meshtastic Interaction:** `meshtastic` Python library
 * **Database:** SQLite (default), configurable via `DATABASE_URL` (e.g., PostgreSQL)
-* **Frontend:** HTML, Bootstrap 5, JavaScript, jQuery
+* **Frontend:** Vue 3, Tailwind CSS, Vite
 * **Mapping:** Leaflet.js
-* **Real-time Updates:** AJAX polling
+* **Real-time Updates:** WebSockets
 * **Environment Management:** `python-dotenv`
 * **AI Integration:** `openai` Python library
 
 ## Project Structure
 
-The project is organized into three main Django apps:
+The project consists of a Vue frontend and multiple Django apps for the backend:
 
+* `frontend`: Vue 3 single-page application built with Vite and Tailwind CSS.
 * `metrastics_listener`: Contains models for all Meshtastic data (Node, Packet, Message, Position, Telemetry, etc.) and the management command (`listen_device`) responsible for connecting to the Meshtastic device, processing incoming data, and saving it to the database. It also handles the Flask-based API endpoint for sending messages and is configured to start automatically with the Django development server.
 * `metrastics_dashboard`: Provides the views, templates, and API endpoints for the web-based user interface where users can view the collected data, node details, maps, and live feeds.
 * `metrastics_commander`: Manages the rules for automated responses and the ChatGPT integration. It includes models for `CommanderRule` and views for managing these rules via the UI and an API.
@@ -131,9 +132,34 @@ The project is organized into three main Django apps:
     The Meshtastic listener (`listen_device` command) is configured to start automatically in a separate thread when the Django development server starts. You should see log messages indicating its startup in the console.
     By default, the web application will be accessible at `http://127.0.0.1:8000/`.
 
+## Frontend Development
+
+The Vue frontend lives in `frontend/`.
+
+Install dependencies:
+
+```bash
+cd frontend
+npm install
+```
+
+Run the development server:
+
+```bash
+npm run dev
+```
+
+Build production assets:
+
+```bash
+npm run build
+```
+
+The build outputs to `metrastics_dashboard/static/` to be served by Django.
+
 ## Run with Docker Compose
 
-An easier way to start the project is via Docker Compose. This builds a container with all dependencies and runs the Django development server.
+An easier way to start the project is via Docker Compose. This builds containers for the Django backend and the Vue development server.
 
 1. Copy `.env.example` to `.env` and adjust values as needed.
 2. Build and start the service:
@@ -142,7 +168,7 @@ An easier way to start the project is via Docker Compose. This builds a containe
     docker-compose up --build
     ```
 
-   The dashboard will be available at [http://localhost:8000](http://localhost:8000).
+   The backend API will be available at [http://localhost:8000](http://localhost:8000) and the frontend dev server at [http://localhost:5173](http://localhost:5173).
 
 ## Usage
 
